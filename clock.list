@@ -1,0 +1,2896 @@
+0001                         *--------------------------------------------------------------------
+0002                         * HD68P05V07 VFD CLOCK
+0003                         * Ver.1.0 20211225
+0004                         * (c)comoneko
+0005                         *--------------------------------------------------------------------
+0006                         
+0007                         *********************************************************************
+0008 0000                    PortA		equ	$000
+0009 0001                    PortB		equ	$001
+0010 0002                    PortC		equ	$002
+0011 0003                    PortD		equ	$003
+0012 0004                    PortA_DR	equ	$004
+0013 0005                    PortB_DR	equ	$005
+0014 0006                    PortC_DR	equ	$006
+0015 0007                    PortD_AN	equ	$007
+0016 0008                    TimerDataReg	equ	$008
+0017 0009                    TimerCTRLReg	equ	$009
+0018 0007                    TCRBitIRQ	equ	7
+0019 0006                    TCRBitMask	equ	6
+0020 0004                    TXOUT		equ	4
+0021 0000                    RXIN		equ	0
+0022 0005                    RTSOUT		equ	5
+0023 0001                    CTSIN		equ	1
+0024                         
+0025 0020                    RAM_BASE	equ	$020
+0026 007f                    RAM_TOP		equ	$07F
+0027                         
+0028 0080                    ROM_BASE	equ	$080
+0029 0f7f                    ROM_TOP		equ	$F7F
+0030                         
+0031 0ff8                    VECTOR_TABLE	equ	$FF8
+0032                         
+0033 007f                    STACK_BASE	equ	RAM_TOP
+0034 007f                    STACK_PCL	equ	STACK_BASE
+0035 007e                    STACK_PCH	equ	STACK_BASE-1
+0036 007d                    STACK_INDEX	equ	STACK_BASE-2
+0037 007c                    STACK_ACCM	equ	STACK_BASE-3
+0038 007b                    STACK_CCR	equ	STACK_BASE-4
+0039                         
+0040                         *define uses port
+0041 0040                    PortC_VFDHeater	equ	$40
+0042 0080                    PortC_HBLED	equ	$80
+0043                         *********************************************************************
+0044                         *********************************************************************
+0045                         *--------------------------------------------------------------------
+0046                         *--------------------------------------------------------------------
+0047                         *work valiables
+0048 0020                    		org	RAM_BASE
+0049                         * Thread control	18uses
+0050 0020                    THContext0	rmb	4	*thread context save
+0051 0024                    THContext1	rmb	4	*  +0:ACCM
+0052 0028                    THContext2	rmb	4	*  +1:INDEX
+0053 002c                    THContext3	rmb	4	*  +2,+3:PCL/PCH
+0054 0030                    THNumber	rmb	1	*runnning thread number
+0055 0031                    THState		rmb	1	*thread status
+0056 0003                    THBitThNum	equ	$03	*running thread number in THState
+0057 00fc                    notTHBitThNum	equ	$FC	*running thread number in THState
+0058 0007                    THBitTimerFlag	equ	7	*timer irq passing flag in THState
+0059 0006                    THBitClockTrig	equ	6	*1/100s triger
+0060 0004                    THBitSecFlag	equ	4	*1s flipflop
+0061 0000                    THBitWaitDummy	equ	0	*wait dummy
+0062                         *VFD Display		11uses
+0063 0032                    VFDDigitScan	rmb	1	*VFD grid scan counter
+0064 0033                    VFDScanStartPos	rmb	1	*Scan Start Address offset 0-9
+0065 0034                    VFDDigitValue	rmb	9	*VFD digit data code
+0066                         *purpose work		8uses
+0067 003d                    Work0		rmb	1	*purpose work
+0068 003e                    Work1		rmb	1	*
+0069 003f                    Work2		rmb	1	*
+0070 0040                    Work3		rmb	1	*
+0071 0041                    Work4		rmb	1	*
+0072 0042                    Work5		rmb	1	*
+0073 0043                    Work6		rmb	1	*
+0074 0044                    Work7		rmb	1	*
+0075                         *clock variables	9uses
+0076 0045                    CLYear		rmb	2	*Year
+0077 0047                    CLMon		rmb	1	*month
+0078 0048                    CLDay		rmb	1	*day
+0079 0049                    CLHou		rmb	1	*Hour
+0080 004a                    CLMin		rmb	1	*minutes
+0081 004b                    CLSec		rmb	1	*seconds
+0082 004c                    CLmSec		rmb	1	*1/100 seconds
+0083 004d                    CLDispMode	rmb	1	*display mode
+0084 0003                    CLBitLeapYear	equ	3	*leap year flag in ThState
+0085                         *button input work	3uses
+0086 004e                    BTLastData	rmb	2	*edge datect work
+0087 0050                    BTSetDigit	rmb	1	*setting digit position
+0088 0003                    BTPort		equ	PortD
+0089 00fc                    BTMask		equ	$FC
+0090 0002                    BTSw1		equ	2
+0091 0003                    BTSw2		equ	3
+0092 0004                    BTSw3		equ	4
+0093 0005                    BTSw4		equ	5
+0094 0006                    BTSw5		equ	6
+0095 0007                    BTSw6		equ	7
+0096 0005                    ADJMode		equ	5	*clock adjust mode flag in THState
+0097                         *UART BUFFER		12uses
+0098 0051                    UARTTxBuff	rmb	4
+0099 0055                    UARTRxBuff	rmb	4
+0100 0059                    UARTTxWPtr	rmb	1
+0101 005a                    UARTTxRPtr	rmb	1
+0102 005b                    UARTRxWPtr	rmb	1
+0103 005c                    UARTRxRPtr	rmb	1
+0104                         *monitor work		12uses
+0105 005d                    MonWork		rmb	8
+0106 0065                    MonInpCnt	rmb	1
+0107 0066                    MonPerReg	rmb	1
+0108 0067                    MonGWork	rmb	2
+0109 0069                    MonRegA		rmb	1
+0110 006a                    MonRegX		rmb	1
+0111 006b                    MonSWIFlag	rmb	1
+0112                         *Check LED		1uses
+0113 006c                    CLEDWork	rmb	1
+0114                         *
+0115                         *********************************************************************
+0116                         *********************************************************************
+0117                         *--------------------------------------------------------------------
+0118                         *--------------------------------------------------------------------
+0119 0080                    		org	ROM_BASE
+0120                         *--------------------------------------------------------------------
+0121                         * VFD grid scan & segment port bit pattern table
+0122                         *TABEL DATA		 1'fg2ed3  456.7,/8      cba9
+0123 0080 e6 14 0e           VFDScanBitTbl	fcb	%11100110,%00010100,%00001110		*1 0
+0124 0083 48 14 0c           		fcb	%01001000,%00010100,%00001100		*2 1
+0125 0086 57 14 06           		fcb	%01010111,%00010100,%00000110		*3 2
+0126 0089 52 94 0e           		fcb	%01010010,%10010100,%00001110		*4 3
+0127 008c 70 54 0c           		fcb	%01110000,%01010100,%00001100		*5 4
+0128 008f 72 34 0a           		fcb	%01110010,%00110100,%00001010		*6 5
+0129 0092 76 1c 0a           		fcb	%01110110,%00011100,%00001010		*7 6
+0130 0095 60 15 0e           		fcb	%01100000,%00010101,%00001110		*8 7
+0131 0098 76 14 0f           		fcb	%01110110,%00010100,%00001111		*9 8
+0132 009b 72 14 0e           		fcb	%01110010,%00010100,%00001110		*  9
+0133 009e 74 14 0e           		fcb	%01110100,%00010100,%00001110		*  A
+0134 00a1 76 14 08           		fcb	%01110110,%00010100,%00001000		*  b
+0135 00a4 66 14 02           		fcb	%01100110,%00010100,%00000010		*  C
+0136 00a7 56 14 0c           		fcb	%01010110,%00010100,%00001100		*  d
+0137 00aa 76 14 02           		fcb	%01110110,%00010100,%00000010		*  E
+0138 00ad 74 14 02           		fcb	%01110100,%00010100,%00000010		*  F
+0139                         *                        1'fg2ed3  456.7,/8      cba9
+0140 00b0 66 14 0a           		fcb	%01100110,%00010100,%00001010		*  G
+0141 00b3 74 14 0c           		fcb	%01110100,%00010100,%00001100		*  H
+0142 00b6 40 14 08           		fcb	%01000000,%00010100,%00001000		*  i
+0143 00b9 46 14 0c           		fcb	%01000110,%00010100,%00001100		*  J
+0144 00bc 74 14 00           		fcb	%01110100,%00010100,%00000000		*  k
+0145 00bf 66 14 00           		fcb	%01100110,%00010100,%00000000		*  L
+0146 00c2 54 14 08           		fcb	%01010100,%00010100,%00001000		*  n
+0147 00c5 56 14 08           		fcb	%01010110,%00010100,%00001000		*  o
+0148 00c8 74 16 06           		fcb	%01110100,%00010110,%00000110		*  P
+0149 00cb 70 14 0e           		fcb	%01110000,%00010100,%00001110		*  q
+0150 00ce 54 14 00           		fcb	%01010100,%00010100,%00000000		*  r
+0151 00d1 76 14 00           		fcb	%01110110,%00010100,%00000000		*  t
+0152 00d4 46 14 08           		fcb	%01000110,%00010100,%00001000		*  u
+0153 00d7 72 14 0c           		fcb	%01110010,%00010100,%00001100		*  y
+0154                         *		fcb	%01000000,%00010110,%00000000		*  1/2
+0155 00da 50 14 00           		fcb	%01010000,%00010100,%00000000		*  -
+0156 00dd 40 14 00           		fcb	%01000000,%00010100,%00000000		*  space
+0157                         
+0158                         *monthly days table
+0159 00e0 1f 1c 1f 1e 1f 1e  CLMonthTable	fcb	31,28,31,30,31,30,31,31,30,31,30,31
+     1f 1f 1e 1f 1e 1f
+0160 00ec 0c 1f 17 3b 3b 63  CLSetMax	fcb	12,31,23,59,59,99
+0161 00f2 01 01 00 00 00 00  CLSetMin	fcb	 1, 1, 0, 0, 0, 0
+0162                         
+0163 0089                    VFDScnMsk0	equ	$89	*VFD grid bit masking
+0164 00e9                    VFDScnMsk1	equ	$E9	*
+0165 0001                    VFDScnMsk2	equ	$01	*
+0166 0036                    VFDSegMsk0	equ	$36	*VFD segment bit mask
+0167 0002                    VFDSegMsk1	equ	$02	*
+0168 000e                    VFDSegMsk2	equ	$0E	*
+0169 0040                    VFDMsk0Dush	equ	$40	*VFD dush mask bit
+0170 0010                    VFDMsk1Com	equ	$10	*VFD commma mask bit
+0171 0004                    VFDMsk1Dp	equ	$04	*VFD dot mask bit
+0172 0020                    VFDSegCom	equ	$20	*comma code bit
+0173 0040                    VFDSegDush	equ	$40	*dush code bit
+0174 0080                    VFDSegDp	equ	$80	*dot code bit
+0175 0005                    VFDBitCom	equ	5	*comma code bit
+0176 0006                    VFDBitDush	equ	6	*dush code bit
+0177 0007                    VFDBitDp	equ	7	*dot code bit
+0178                         
+0179 0000                    VFDCHR_0	equ	0
+0180 0001                    VFDCHR_1	equ	1
+0181 0002                    VFDCHR_2	equ	2
+0182 0003                    VFDCHR_3	equ	3
+0183 0004                    VFDCHR_4	equ	4
+0184 0005                    VFDCHR_5	equ	5
+0185 0006                    VFDCHR_6	equ	6
+0186 0007                    VFDCHR_7	equ	7
+0187 0008                    VFDCHR_8	equ	8
+0188 0009                    VFDCHR_9	equ	9
+0189 000a                    VFDCHR_A	equ	10
+0190 000b                    VFDCHR_b	equ	11
+0191 000c                    VFDCHR_c	equ	12
+0192 000d                    VFDCHR_d	equ	13
+0193 000e                    VFDCHR_E	equ	14
+0194 000f                    VFDCHR_F	equ	15
+0195 0010                    VFDCHR_G	equ	16
+0196 0011                    VFDCHR_H	equ	17
+0197 0012                    VFDCHR_i	equ	18
+0198 0013                    VFDCHR_J	equ	19
+0199 0014                    VFDCHR_k	equ	20
+0200 0015                    VFDCHR_L	equ	21
+0201 0016                    VFDCHR_n	equ	22
+0202 0017                    VFDCHR_o	equ	23
+0203 0018                    VFDCHR_P	equ	24
+0204 0019                    VFDCHR_q	equ	25
+0205 001a                    VFDCHR_r	equ	26
+0206 001b                    VFDCHR_t	equ	27
+0207 001c                    VFDCHR_u	equ	28
+0208 001d                    VFDCHR_y	equ	29
+0209                         *VFDCHR_12	equ	29
+0210 001e                    VFDCHR_MI	equ	30
+0211 001f                    VFDCHR_SPACE	equ	31
+0212                         *********************************************************************
+0213                         *********************************************************************
+0214                         *--------------------------------------------------------------------
+0215                         * sub routins
+0216                         *--------------------------------------------------------------------
+0217                         * Read vfd bit pattern table
+0218                         *	Work0 = number 0-15
+0219                         *	Work1 = Mask0
+0220                         *	Work2 = Mask1
+0221                         *	Work3 = Mask2
+0222                         *	PORTA data
+0223                         *	PORTB data
+0224                         *	PORTC data
+0225 00f8 b6 3d              TBLRead		lda	Work0		*read display code
+0226 00fa 48                 		lsla			*offset cal. code * 3
+0227 00fb bb 3d              		add	Work0		*
+0228 00fd ab 80              		add	#VFDScanBitTbl
+0229 00ff 97                 		tax			*move to index reg
+0230 0100 f6                 		lda	,X		*1st data read
+0231 0101 b4 3e              		and	Work1		*bit masking
+0232 0103 ba 00              		ora	PortA
+0233 0105 b7 00              		sta	PortA		*store 1st data
+0234 0107 5c                 		incx			*next index address
+0235 0108 f6                 		lda	,X 		*2nd data read
+0236 0109 b4 3f              		and	Work2		*bit masking
+0237 010b ba 01              		ora	PortB
+0238 010d b7 01              		sta	PortB		*store 2nd data
+0239 010f 5c                 		incx			*next index address
+0240 0110 f6                 		lda	,X 		*3rd data read
+0241 0111 b4 40              		and	Work3		*bit masking
+0242 0113 ba 02              		ora	PortC
+0243 0115 b7 02              		sta	PortC		*store 3rd data
+0244 0117 81                 		rts
+0245                         * Read vfd grid scan bit pattern table
+0246                         *	Work0 = number 0-8
+0247                         *	Work1 = x
+0248                         *	Work2 = x
+0249                         *	Work3 = x
+0250 0118 a6 89              TBLReadScan	lda	#VFDScnMsk0
+0251 011a b7 3e              		sta	Work1
+0252 011c a6 e9              		lda	#VFDScnMsk1
+0253 011e b7 3f              		sta	Work2
+0254 0120 a6 01              		lda	#VFDScnMsk2
+0255 0122 b7 40              		sta	Work3
+0256 0124 20 d2              		bra	TBLRead		*jump table read
+0257                         * Read vfd grid scan bit pattern table
+0258                         *	Work0 = number 0-15 & dot etc bit
+0259                         *	Work1 = x
+0260                         *	Work2 = x
+0261                         *	Work3 = x
+0262 0126 a6 36              TBLReadSeg	lda	#VFDSegMsk0	*1st mask data set
+0263 0128 b7 3e              		sta	Work1		*
+0264 012a a6 02              		lda	#VFDSegMsk1	*
+0265 012c b7 3f              		sta	Work2		*2nd mask data set
+0266 012e a6 0e              		lda	#VFDSegMsk2	*3rd mask data set
+0267 0130 b7 40              		sta	Work3
+0268                         
+0269 0132 0b 3d 06           		brclr	VFDBitCom,Work0,TBLRSeg00
+0270 0135 b6 3f              		lda	Work2		*VFD common bit set
+0271 0137 aa 10              		ora	#VFDMsk1Com
+0272 0139 b7 3f              		sta	Work2
+0273                         
+0274 013b 0d 3d 06           TBLRSeg00	brclr	VFDBitDush,Work0,TBLRSeg01
+0275 013e b6 3e              		lda	Work1		*VFD dush bit set
+0276 0140 aa 40              		ora	#VFDMsk0Dush
+0277 0142 b7 3e              		sta	Work1
+0278                         
+0279 0144 0f 3d 06           TBLRSeg01	brclr	VFDBitDp,Work0,TBLRSeg02
+0280 0147 b6 3f              		lda	Work2	*VFD dot bit set
+0281 0149 aa 04              		ora	#VFDMsk1Dp
+0282 014b b7 3f              		sta	Work2
+0283 014d b6 3d              TBLRSeg02	lda	Work0
+0284 014f a4 1f              		and	#$1F
+0285 0151 b7 3d              		sta	Work0
+0286 0153 20 a3              		bra	TBLRead		*jump table read
+0287                         *--------------------------------------------------------------------
+0288                         *	BINARY to HEX
+0289                         *	X = address(0000-00FF)
+0290                         *	A	LSB(0-F)
+0291                         *	X	MSB(0-F)
+0292                         *--------------------------------------------------------------------
+0293 0155 f6                 Bin2Hex		lda	,x
+0294 0156 97                 		tax
+0295 0157 54                 		lsrx
+0296 0158 54                 		lsrx
+0297 0159 54                 		lsrx
+0298 015a 54                 		lsrx
+0299 015b a4 0f              		and	#$0F
+0300 015d 81                 		rts
+0301                         *	VFD DISPLAY
+0302 015e ad f5              Bin2HexDisp	bsr	Bin2Hex
+0303 0160 bf 3b              		stx	VFDDigitValue+7
+0304 0162 b7 3c              		sta	VFDDigitValue+8
+0305 0164 81                 		rts
+0306                         *	Ascii code
+0307 0165 ad ee              Bin2Ascii	bsr	Bin2Hex
+0308 0167 b7 44              		sta	Work7
+0309 0169 9f                 		txa
+0310 016a ab 30              		add	#$30
+0311 016c a1 3a              		cmp	#$3a
+0312 016e 2b 02              		bmi	Bin2Ascii00
+0313 0170 ab 07              		add	#$07
+0314 0172 97                 Bin2Ascii00	tax
+0315 0173 b6 44              		lda	Work7
+0316 0175 ab 30              		add	#$30
+0317 0177 a1 3a              		cmp	#$3a
+0318 0179 2b 02              		bmi	Bin2Ascii01
+0319 017b ab 07              		add	#$07
+0320 017d 81                 Bin2Ascii01	rts
+0321                         
+0322                         *--------------------------------------------------------------------
+0323                         *	HEX to BINARY
+0324                         *	X = hex string top address
+0325                         *	Work0 High byte Binary
+0326                         *	Work1 Low byte Binary
+0327                         *--------------------------------------------------------------------
+0328 017e a6 08              Hex2Bin		lda	#$8		*space pass
+0329 0180 b7 3f              		sta	Work2		*
+0330 0182 f6                 H2B00		lda	,X		*
+0331 0183 a1 30              		cmp	#$30		* < 0
+0332 0185 2a 07              		bpl	H2B01		*
+0333 0187 5c                 		incx			*
+0334 0188 3a 3f              		dec	Work2		*
+0335 018a 26 f6              		bne	H2B00		*
+0336 018c 20 4a              		bra	H2BEND		*
+0337 018e bf 40              H2B01		stx	Work3		*a->A convart
+0338 0190 a6 08              		lda	#$8		*
+0339 0192 b7 3f              		sta	Work2		*
+0340 0194 f6                 H2B02		lda	,X		*
+0341 0195 a1 30              		cmp	#$30		* < 0
+0342 0197 2b 0e              		bmi	H2B04		* 
+0343 0199 a1 47              		cmp	#$47		*>= G
+0344 019b 2b 03              		bmi	H2B03		*
+0345 019d a0 20              		sub	#$20		*
+0346 019f f7                 		sta	,X		*
+0347 01a0 5c                 H2B03		incx			*
+0348 01a1 3a 3f              		dec	Work2		*
+0349 01a3 26 ef              		bne	H2B02		*
+0350 01a5 20 31              		bra	H2BEND		*
+0351 01a7 be 40              H2B04		ldx	Work3		*
+0352 01a9 3f 3d              		clr	Work0		*
+0353 01ab 3f 3e              		clr	Work1		*
+0354 01ad a6 04              		lda	#$4		*
+0355 01af b7 3f              		sta	Work2		*
+0356 01b1 f6                 H2B05		lda	,X		*
+0357 01b2 a1 30              		cmp	#$30		*term detect
+0358 01b4 2b 22              		bmi	H2BEND		*
+0359 01b6 98                 		clc			*clear carry
+0360 01b7 39 3e              		rol	Work1		*
+0361 01b9 39 3d              		rol	Work0		*
+0362 01bb 39 3e              		rol	Work1		*
+0363 01bd 39 3d              		rol	Work0		*
+0364 01bf 39 3e              		rol	Work1		*
+0365 01c1 39 3d              		rol	Work0		*
+0366 01c3 39 3e              		rol	Work1		*
+0367 01c5 39 3d              		rol	Work0		*
+0368 01c7 a0 30              		sub	#$30		*-$30
+0369 01c9 a1 0a              		cmp	#$0a		* > 9
+0370 01cb 2b 02              		bmi	H2B06		*
+0371 01cd a0 07              		sub	#$07		* -7
+0372 01cf ba 3e              H2B06		ora	Work1		*
+0373 01d1 b7 3e              		sta	Work1		*
+0374 01d3 5c                 		incx			*
+0375 01d4 3a 3f              		dec	Work2		*
+0376 01d6 26 d9              		bne	H2B05		*
+0377 01d8 81                 H2BEND		rts
+0378                         *--------------------------------------------------------------------
+0379                         *16bit sub
+0380                         *work7,6 = work7,6 - wokrk5,4
+0381                         *--------------------------------------------------------------------
+0382 01d9 b6 43              LIBSub16	lda	Work6
+0383 01db b0 41              		sub	Work4
+0384 01dd b7 43              		sta	Work6
+0385 01df b6 44              		lda	Work7
+0386 01e1 b2 42              		sbc	Work5
+0387 01e3 b7 44              		sta	Work7
+0388 01e5 81                 		rts
+0389                         *********************************************************************
+0390                         *--------------------------------------------------------------------
+0391                         *	debug LED
+0392                         *--------------------------------------------------------------------
+0393 01e6 b7 6c              CheckLED	sta	CLEDWork		*5
+0394 01e8 b6 02              		lda	PortC			*4
+0395 01ea a8 80              		eor	#PortC_HBLED		*2
+0396 01ec 83                 		swi
+0397 01ed b7 02              		sta	PortC			*5
+0398 01ef b6 6c              		lda	CLEDWork		*4
+0399 01f1 81                 		rts				*6
+0400                         *********************************************************************
+0401                         *--------------------------------------------------------------------
+0402                         *
+0403                         *Timer IRQ
+0404                         *
+0405                         *--------------------------------------------------------------------
+0406 01f2 1f 09              TIMER_IRQ	bclr	TCRBitIRQ,TimerCTRLReg		*irq clear
+0407 01f4 1e 31              		bset	THBitTimerFlag,THState		*passing flag set
+0408 01f6 80                 		rti
+0409                         *--------------------------------------------------------------------
+0410                         *
+0411                         *INT_IRQ
+0412                         *
+0413                         *--------------------------------------------------------------------
+0414                         INT_IRQ
+0415 01f7 80                 		rti
+0416                         *--------------------------------------------------------------------
+0417                         *
+0418                         *SWI
+0419                         *
+0420                         *--------------------------------------------------------------------
+0421 01f8 cc 0c 04           SWI_IRQ		jmp	MonitorSWI
+0422                         *--------------------------------------------------------------------
+0423                         *********************************************************************
+0424                         *********************************************************************
+0425                         *--------------------------------------------------------------------
+0426                         *--------------------------------------------------------------------
+0427                         *thread switch entry
+0428                         *--------------------------------------------------------------------
+0429                         THSwitch
+0430                         *context save
+0431 01fb 9b                 		sei			*irq disable
+0432 01fc b7 7c              		sta	STACK_ACCM
+0433 01fe bf 7d              		stx	STACK_INDEX
+0434 0200 b6 30              		lda	THNumber	*get running thread number
+0435 0202 a4 03              		and	#THBitThNum	*
+0436 0204 48                 		lsla			* context save work address cal
+0437 0205 48                 		lsla			* x4
+0438 0206 ab 20              		add	#THContext0	*base address add
+0439 0208 97                 		tax			*move to index reg
+0440 0209 b6 7c              		lda	STACK_ACCM
+0441 020b f7                 		sta	,X		*store stack data
+0442 020c 5c                 		incx
+0443 020d b6 7d              		lda	STACK_INDEX	*
+0444 020f f7                 		sta	,X		*
+0445 0210 5c                 		incx
+0446 0211 b6 7e              		lda	STACK_PCH	*
+0447 0213 f7                 		sta	,X		*
+0448 0214 5c                 		incx
+0449 0215 b6 7f              		lda	STACK_PCL	*
+0450 0217 f7                 		sta	,X		*
+0451 0218 9a                 		cli			*irq enable
+0452                         *post thread call
+0453 0219 cd 03 0e           		jsr	ThreadPost
+0454                         *1/100 triger
+0455 021c b6 30              		lda	THNumber	*thread number 3bit mask
+0456 021e a4 07              		and	#$07		*
+0457 0220 26 02              		bne	THTrig00	*all bit zero. set flag
+0458 0222 1c 31              		bset	THBitClockTrig,THState
+0459                         THTrig00
+0460                         *next thread context load
+0461 0224 3c 30              		inc	THNumber	*incliment thread number
+0462                         THStart
+0463 0226 9b                 		sei			*irq disable
+0464 0227 b6 30              		lda	THNumber	*get running thread number
+0465 0229 a4 03              		and	#THBitThNum	*
+0466 022b 48                 		lsla			* context save work address cal
+0467 022c 48                 		lsla			* x4
+0468 022d ab 23              		add	#THContext0+3	*base address add
+0469 022f 97                 		tax			*move to index reg
+0470 0230 f6                 		lda	,X		*reload stack data
+0471 0231 b7 7f              		sta	STACK_PCL	*
+0472 0233 5a                 		decx			*
+0473 0234 f6                 		lda	,X		*
+0474 0235 b7 7e              		sta	STACK_PCH	*
+0475 0237 5a                 		decx			*
+0476 0238 f6                 		lda	,X		*
+0477 0239 b7 7d              		sta	STACK_INDEX	*
+0478 023b 5a                 		decx			*
+0479 023c f6                 		lda	,X		*
+0480 023d be 7d              		ldx	STACK_INDEX	*
+0481 023f 9a                 		cli			*irq enable
+0482                         *wait timerup
+0483 0240 0f 31 fd           SWIWaitTimerUp	brclr	THBitTimerFlag,THState,SWIWaitTimerUp
+0484 0243 1f 31              		bclr	THBitTimerFlag,THState
+0485                         *pre thread call
+0486 0245 cd 02 d3           		jsr	ThreadPre
+0487                         *return next thread
+0488 0248 81                 		rts
+0489                         *--------------------------------------------------------------------
+0490                         *********************************************************************
+0491                         *********************************************************************
+0492                         *--------------------------------------------------------------------
+0493                         *--------------------------------------------------------------------
+0494                         *
+0495                         *MAIN
+0496                         *
+0497                         *--------------------------------------------------------------------
+0498                         *--------------------------------------------------------------------
+0499                         *--------------------------------------------------------------------
+0500                         START
+0501 0249 9b                 		sei
+0502                         *--------------------------------------------------------------------
+0503                         *Peripheral initialize
+0504                         * PORT
+0505 024a a6 ff              		lda	#$FF
+0506 024c b7 04              		sta	PortA_DR
+0507 024e b7 05              		sta	PortB_DR
+0508 0250 b7 06              		sta	PortC_DR
+0509 0252 3f 00              		clr	PortA
+0510 0254 3f 01              		clr	PortB
+0511 0256 3f 02              		clr	PortC
+0512                         * Timer
+0513 0258 a6 30              		lda	#$30
+0514 025a b7 09              		sta	TimerCTRLReg
+0515 025c a6 ff              		lda	#$FF
+0516 025e b7 08              		sta	TimerDataReg
+0517                         * External INT
+0518                         	
+0519                         *work initialize
+0520                         *display work init
+0521 0260 3f 32              		clr	VFDDigitScan
+0522 0262 3f 34              		clr	VFDDigitValue+0
+0523 0264 3f 35              		clr	VFDDigitValue+1
+0524 0266 3f 36              		clr	VFDDigitValue+2
+0525 0268 3f 37              		clr	VFDDigitValue+3
+0526 026a 3f 38              		clr	VFDDigitValue+4
+0527 026c 3f 39              		clr	VFDDigitValue+5
+0528 026e 3f 3a              		clr	VFDDigitValue+6
+0529 0270 3f 3b              		clr	VFDDigitValue+7
+0530 0272 3f 3c              		clr	VFDDigitValue+8
+0531 0274 3f 33              		clr	VFDScanStartPos
+0532                         *clock work init
+0533 0276 3f 4c              		clr	CLmSec
+0534 0278 3f 4b              		clr	CLSec
+0535 027a 3f 4a              		clr	CLMin
+0536 027c 3f 49              		clr	CLHou
+0537 027e 3f 4d              		clr	CLDispMode
+0538 0280 a6 01              		lda	#1
+0539 0282 b7 48              		sta	CLDay
+0540 0284 b7 47              		sta	CLMon
+0541 0286 a6 e6              		lda	#$e6
+0542 0288 b7 45              		sta	CLYear
+0543 028a a6 07              		lda	#$07
+0544 028c b7 46              		sta	CLYear+1
+0545                         *button input
+0546 028e a6 ff              		lda	#$FF
+0547 0290 b7 4e              		sta	BTLastData
+0548 0292 b7 4f              		sta	BTLastData+1
+0549                         *thread initialize
+0550 0294 3f 30              		clr	THNumber
+0551 0296 3f 31              		clr	THState
+0552 0298 3f 20              		clr	THContext0
+0553 029a 3f 21              		clr	THContext0+1
+0554 029c 3f 24              		clr	THContext1
+0555 029e 3f 25              		clr	THContext1+1
+0556 02a0 3f 28              		clr	THContext2
+0557 02a2 3f 29              		clr	THContext2+1
+0558 02a4 3f 2c              		clr	THContext3
+0559 02a6 3f 2d              		clr	THContext3+1
+0560 02a8 a6 03              		lda	#Thread0Exec/256
+0561 02aa b7 22              		sta	THContext0+2
+0562 02ac a6 22              		lda	#Thread0Exec&$FF
+0563 02ae b7 23              		sta	THContext0+3
+0564 02b0 a6 03              		lda	#Thread1Exec/256
+0565 02b2 b7 26              		sta	THContext1+2
+0566 02b4 a6 b8              		lda	#Thread1Exec&$FF
+0567 02b6 b7 27              		sta	THContext1+3
+0568 02b8 a6 04              		lda	#Thread2Exec/256
+0569 02ba b7 2a              		sta	THContext2+2
+0570 02bc a6 e0              		lda	#Thread2Exec&$FF
+0571 02be b7 2b              		sta	THContext2+3
+0572 02c0 a6 07              		lda	#Thread3Exec/256
+0573 02c2 b7 2e              		sta	THContext3+2
+0574 02c4 a6 ec              		lda	#Thread3Exec&$FF
+0575 02c6 b7 2f              		sta	THContext3+3
+0576 02c8 9c                 		rsp
+0577                         *UART INIT	
+0578 02c9 cd 08 9a           		jsr	UARTInit
+0579                         
+0580                         *Monitor init
+0581 02cc cd 0c 0b           		jsr	MonitorIni
+0582                         
+0583 02cf 9a                 		cli			*IRQ enable
+0584 02d0 cd 02 26           		jsr	THStart
+0585                         *--------------------------------------------------------------------
+0586                         *--------------------------------------------------------------------
+0587                         *pre thread
+0588                         *--------------------------------------------------------------------
+0589                         ThreadPre
+0590                         *--------------------------------------------------------------------
+0591                         * VFD display scan
+0592                         *--------------------------------------------------------------------
+0593 02d3 3f 00              		clr	PortA		*off vfd display
+0594 02d5 3f 01              		clr	PortB		*
+0595 02d7 a6 f0              		lda	#$F0		*
+0596 02d9 b4 02              		and	PortC		*
+0597 02db b7 02              		sta	PortC		*
+0598 02dd b6 32              		lda	VFDDigitScan	*digit segment data offset calc.
+0599 02df bb 33              		add	VFDScanStartPos	*
+0600 02e1 2b 0a              		bmi	THPre02		* value range check
+0601 02e3 a1 09              		cmp	#9		*
+0602 02e5 2a 06              		bpl	THPre02		*
+0603 02e7 ab 34              		add	#VFDDigitValue	*
+0604 02e9 97                 		tax			*
+0605 02ea f6                 		lda	,X		*
+0606 02eb 20 02              		bra	THPre03		*
+0607 02ed a6 1f              THPre02		lda	#VFDCHR_SPACE	*
+0608 02ef b7 3d              THPre03		sta	Work0		*set value
+0609 02f1 cd 01 26           		jsr	TBLReadSeg	*set segment pattern
+0610 02f4 b6 32              		lda	VFDDigitScan	*grid pattern data
+0611 02f6 b7 3d              		sta	Work0		*
+0612 02f8 cd 01 18           		jsr	TBLReadScan	*set grid scan pattern
+0613 02fb b6 32              		lda	VFDDigitScan	*incriment scan count
+0614 02fd a1 08              		cmp	#8		*
+0615 02ff 27 03              		beq	THPre00		*
+0616 0301 4c                 		inca			*
+0617 0302 20 07              		bra	THPre01		*
+0618 0304 b6 02              THPre00		lda	PortC		*toggle VFD heater voltage
+0619 0306 a8 40              		eor	#PortC_VFDHeater
+0620 0308 b7 02              		sta	PortC		*
+0621 030a 4f                 		clra			*
+0622 030b b7 32              THPre01		sta	VFDDigitScan	*
+0623 030d 81                 		rts			*
+0624                         *--------------------------------------------------------------------
+0625                         *post thread
+0626                         *--------------------------------------------------------------------
+0627                         ThreadPost
+0628                         *offset scroll proc
+0629 030e b6 30              		lda	THNumber
+0630 0310 a4 1f              		and	#$1f
+0631 0312 a1 1f              		cmp	#$1f
+0632 0314 26 0b              		bne	THPost01
+0633 0316 3d 33              		tst	VFDScanStartPos
+0634 0318 27 07              		beq	THPost01
+0635 031a 2b 03              		bmi	THPost02	*pos incriment
+0636 031c 3a 33              		dec	VFDScanStartPos
+0637 031e 81                 		rts
+0638 031f 3c 33              THPost02	inc	VFDScanStartPos
+0639 0321 81                 THPost01	rts
+0640                         *--------------------------------------------------------------------
+0641                         *--------------------------------------------------------------------
+0642                         
+0643                         *--------------------------------------------------------------------
+0644                         *thread 0 exec entry
+0645                         Thread0Exec
+0646 0322 cd 01 fb           		jsr	THSwitch
+0647                         *--------------------------------------------------------------------
+0648                         *--------------------------------------------------------------------
+0649                         *clock count
+0650                         *--------------------------------------------------------------------
+0651 0325 b6 4c              		lda	CLmSec
+0652 0327 a1 32              		cmp	#50
+0653 0329 2b 04              		bmi	CL08
+0654 032b 19 31              		bclr	THBitSecFlag,THState
+0655 032d 20 02              		bra	CL09
+0656 032f 18 31              CL08		bset	THBitSecFlag,THState
+0657 0331 0d 31 ee           CL09		brclr	THBitClockTrig,THState,Thread0Exec	*check 1/100 trig
+0658 0334 1d 31              		bclr	THBitClockTrig,THState
+0659 0336 0b 31 03           		brclr	ADJMode,THState,CLCountUp		*adjust mode check
+0660 0339 cc 03 a9           		jmp	CL07					*adjust mode pass count up
+0661 033c b6 4c              CLCountUp	lda	CLmSec		*up count miliseconds
+0662 033e 4c                 		inca			*
+0663 033f a1 64              		cmp	#100		*if 100 over branch
+0664 0341 24 04              		bhs	CL00		*
+0665 0343 b7 4c              		sta	CLmSec		*
+0666 0345 20 62              		bra	CL07		*
+0667 0347 3f 4c              CL00		clr	CLmSec		*1/100 zero clear
+0668 0349 b6 4b              		lda	CLSec		*up count seconds
+0669 034b 4c                 		inca			*
+0670 034c a1 3c              		cmp	#60		*60 over ?
+0671 034e 24 04              		bhs	CL01		*
+0672 0350 b7 4b              		sta	CLSec		*
+0673 0352 20 55              		bra	CL07		*
+0674 0354 3f 4b              CL01		clr	CLSec		*sec zero clear
+0675 0356 b6 4a              		lda	CLMin		*up count minuts
+0676 0358 4c                 		inca			*
+0677 0359 a1 3c              		cmp	#60		*60 over ?
+0678 035b 24 04              		bhs	CLC02		*
+0679 035d b7 4a              		sta	CLMin		*
+0680 035f 20 48              		bra	CL07		*
+0681 0361 3f 4a              CLC02		clr	CLMin		*Min zero clear
+0682 0363 b6 49              		lda	CLHou		*up count Houre
+0683 0365 4c                 		inca			*
+0684 0366 a1 18              		cmp	#24		*24 over ?
+0685 0368 24 04              		bhs	CL03		*
+0686 036a b7 49              		sta	CLHou		*
+0687 036c 20 3b              		bra	CL07		*
+0688 036e 3f 49              CL03		clr	CLHou		*houre reset
+0689 0370 cd 03 ac           		jsr	CLCheckLeapYear *check leap year
+0690 0373 be 47              		ldx	CLMon		*read monthly days
+0691 0375 5a                 		decx			*
+0692 0376 a6 e0              		lda	#CLMonthTable,X	*
+0693 0378 5a                 		decx			*leap 2 month 29day
+0694 0379 26 04              		bne	CL04		*
+0695 037b 07 31 01           		brclr	CLBitLeapYear,THState,CL04
+0696 037e 4c                 		inca			*
+0697 037f b7 3d              CL04		sta	Work0		*
+0698 0381 b6 48              		lda	CLDay		*day count up
+0699 0383 4c                 		inca			*
+0700 0384 b1 3d              		cmp	Work0		*
+0701 0386 22 04              		bhi	CL05		*
+0702 0388 b7 48              		sta	CLDay		*
+0703 038a 20 1d              		bra	CL07		*
+0704 038c a6 01              CL05		lda	#1		*day count reaset
+0705 038e b7 48              		sta	CLDay		*
+0706 0390 b6 47              		lda	CLMon		*count up month
+0707 0392 4c                 		inca			*
+0708 0393 a1 0c              		cmp	#12		*
+0709 0395 22 04              		bhi	CL06		*
+0710 0397 b7 47              		sta	CLMon		*
+0711 0399 20 0e              		bra	CL07		*
+0712 039b a6 01              CL06		lda	#1		*reset month count
+0713 039d b7 47              		sta	CLMon		*
+0714 039f b6 45              		lda	CLYear		*year count up
+0715 03a1 ab 01              		add	#1		*
+0716 03a3 b7 45              		sta	CLYear		*
+0717 03a5 24 02              		bcc	CL07		*
+0718 03a7 3c 46              		inc	CLYear+1	*
+0719 03a9 cc 03 22           CL07		jmp	Thread0Exec
+0720                         *leap year check routin
+0721                         *check 4year cycle only
+0722                         CLCheckLeapYear
+0723 03ac b6 45              		lda	CLYear		*load year data lower byte
+0724 03ae a4 03              		and	#$03
+0725 03b0 27 03              		beq	CLCheckLY00
+0726 03b2 17 31              		bclr	CLBitLeapYear,THState
+0727 03b4 81                 		rts
+0728 03b5 16 31              CLCheckLY00	bset	CLBitLeapYear,THState
+0729 03b7 81                 		rts
+0730                         *--------------------------------------------------------------------
+0731                         *thread 1 exec entry
+0732                         Thread1Exec
+0733 03b8 cd 01 fb           		jsr	THSwitch
+0734 03bb cc 0c 20           		jmp	MonitorMes00
+0735                         *--------------------------------------------------------------------
+0736                         *--------------------------------------------------------------------
+0737                         *button input
+0738                         *--------------------------------------------------------------------
+0739 03be cd 01 fb           ButtunProc	jsr	THSwitch
+0740 03c1 b6 03              		lda	BTPort		*read switch port
+0741 03c3 a4 fc              		and	#BTMask
+0742 03c5 97                 		tax
+0743 03c6 b4 4e              		and	BTLastData	*cancel chattering
+0744 03c8 bf 4e              		stx	BTLastData
+0745 03ca 43                 		coma
+0746 03cb 97                 		tax
+0747 03cc b7 3d              		sta	Work0
+0748 03ce b8 4f              		eor	BTLastData+1	*push edge detect
+0749 03d0 b4 3d              		and	Work0
+0750 03d2 bf 4f              		stx	BTLastData+1
+0751 03d4 b7 3d              		sta	Work0		*button push branch
+0752 03d6 04 3d 12           		brset	BTSw1,Work0,BTPush1
+0753 03d9 06 3d 1c           		brset	BTSw2,Work0,BTPush2
+0754 03dc 08 3d 27           		brset	BTSw3,Work0,BTPush3
+0755 03df 0a 3d 3d           		brset	BTSw4,Work0,BTPush4
+0756 03e2 0c 3d 52           		brset	BTSw5,Work0,BTPush5
+0757 03e5 0e 3d 65           		brset	BTSw6,Work0,BTPush6
+0758 03e8 cc 09 38           		jmp	MonitorTask
+0759                         *down value
+0760 03eb cd 01 fb           BTPush1		jsr	THSwitch
+0761 03ee 0a 31 03           		brset	ADJMode,THState,BT100
+0762 03f1 cc 03 be           		jmp	ButtunProc
+0763 03f4 4f                 BT100		clra			*dec
+0764 03f5 cc 04 68           		jmp	BTIncDec
+0765                         *up value
+0766 03f8 cd 01 fb           BTPush2		jsr	THSwitch
+0767 03fb 0a 31 03           		brset	ADJMode,THState,BT200
+0768 03fe cc 03 be           		jmp	ButtunProc
+0769 0401 a6 01              BT200		lda	#1
+0770 0403 cc 04 68           		jmp	BTIncDec
+0771                         *edit value move date
+0772 0406 cd 01 fb           BTPush3		jsr	THSwitch
+0773 0409 0a 31 03           		brset	ADJMode,THState,BT300
+0774 040c cc 03 be           		jmp	ButtunProc
+0775 040f b6 4d              BT300		lda	CLDispMode
+0776 0411 4a                 		deca
+0777 0412 a1 05              		cmp	#5
+0778 0414 2b 06              		bmi	BT301
+0779 0416 3a 4d              		dec	CLDispMode
+0780 0418 a6 09              		lda	#$09
+0781 041a b7 33              		sta	VFDScanStartPos
+0782 041c cc 03 be           BT301		jmp	ButtunProc
+0783                         *edit value move time
+0784 041f cd 01 fb           BTPush4		jsr	THSwitch
+0785 0422 0a 31 03           		brset	ADJMode,THState,BT400
+0786 0425 cc 03 be           		jmp	ButtunProc
+0787 0428 b6 4d              BT400		lda	CLDispMode
+0788 042a a1 0b              		cmp	#11
+0789 042c 2a 06              		bpl	BT401	
+0790 042e 3c 4d              		inc	CLDispMode
+0791 0430 a6 f7              		lda	#$F7
+0792 0432 b7 33              		sta	VFDScanStartPos
+0793 0434 cc 03 be           BT401		jmp	ButtunProc
+0794                         *adjust mode on/off
+0795 0437 cd 01 fb           BTPush5		jsr	THSwitch
+0796 043a 0a 31 09           		brset	ADJMode,THState,BT500
+0797 043d a6 05              BT501		lda	#5		*date&time set display mode
+0798 043f b7 4d              		sta	CLDispMode
+0799 0441 1a 31              		bset	ADJMode,THState	*
+0800 0443 cc 03 be           		jmp	ButtunProc	*
+0801 0446 1b 31              BT500		bclr	ADJMode,THState	*adjust mode disable
+0802 0448 3f 4d              		clr	CLDispMode
+0803 044a cc 03 be           		jmp	ButtunProc	*
+0804                         *Display mode change
+0805 044d cd 01 fb           BTPush6		jsr	THSwitch	*
+0806 0450 0b 31 03           		brclr	ADJMode,THState,BT602
+0807 0453 cc 03 be           		jmp	ButtunProc	*adjust mode not change display mode
+0808 0456 b6 4d              BT602		lda	CLDispMode
+0809 0458 4c                 		inca
+0810 0459 a1 05              		cmp	#5
+0811 045b 2b 02              		bmi	BT601
+0812 045d a6 00              BT600		lda	#0
+0813 045f b7 4d              BT601		sta	CLDispMode
+0814 0461 a6 f7              		lda	#$F7
+0815 0463 b7 33              		sta	VFDScanStartPos
+0816 0465 cc 03 be           		jmp	ButtunProc
+0817                         *value inc/dec 
+0818                         * A reg 0:dec 1:inc
+0819 0468 b7 40              BTIncDec	sta	Work3
+0820 046a b6 4d              		lda	CLDispMode
+0821 046c a1 05              		cmp	#5
+0822 046e 27 56              		beq	BTID01		*year 16bit
+0823 0470 a0 06              		sub	#6		*max set value table read
+0824 0472 b7 3d              		sta	Work0		*
+0825 0474 a6 ec              		lda	#CLSetMax	*
+0826 0476 bb 3d              		add	Work0		*
+0827 0478 97                 		tax			*
+0828 0479 f6                 		lda	,X		*
+0829 047a b7 3e              		sta	Work1		*
+0830 047c a6 f2              		lda	#CLSetMin	*min set value table read
+0831 047e bb 3d              		add	Work0		*
+0832 0480 97                 		tax			*
+0833 0481 f6                 		lda	,X		*
+0834 0482 b7 41              		sta	Work4		*
+0835 0484 b6 3d              		lda	Work0		*
+0836 0486 a1 01              		cmp	#1		*day setmode check
+0837 0488 26 17              		bne	BTID02		*
+0838 048a b6 47              		lda	CLMon		*table read month days
+0839 048c 4a                 		deca			*
+0840 048d ab e0              		add	#CLMonthTable	*
+0841 048f 97                 		tax			*
+0842 0490 f6                 		lda	,X		*
+0843 0491 b7 3e              		sta	Work1		*day max value
+0844 0493 b6 47              		lda	CLMon		*leap year check
+0845 0495 a1 02              		cmp	#2		*
+0846 0497 26 08              		bne	BTID02		*
+0847 0499 cd 03 ac           		jsr	CLCheckLeapYear	*
+0848 049c 07 31 02           		brclr	CLBitLeapYear,THState,BTID02
+0849 049f 3c 3e              		inc	Work1		*feb days 29
+0850 04a1 a6 47              BTID02		lda	#CLMon		*value address calc
+0851 04a3 bb 3d              		add	Work0		*
+0852 04a5 97                 		tax			*
+0853 04a6 3d 40              		tst	Work3		*inc or dec
+0854 04a8 27 0d              		beq	BTID03		*jmp dec
+0855 04aa 7c                 		inc	,X		*inc
+0856 04ab b6 3e              		lda	Work1		*check max value
+0857 04ad 4c                 		inca			*
+0858 04ae f1                 		cmp	,X		*
+0859 04af 26 03              		bne	BTID07		*
+0860 04b1 b6 41              		lda	Work4		*if max over set value min
+0861 04b3 f7                 		sta	,X		*
+0862 04b4 cc 03 be           BTID07		jmp	ButtunProc	*
+0863 04b7 f6                 BTID03		lda	,X		*dec
+0864 04b8 b1 41              		cmp	Work4		*check min value
+0865 04ba 26 06              		bne	BTID04		*
+0866 04bc b6 3e              		lda	Work1		*if min under set value max
+0867 04be f7                 		sta	,X		*
+0868 04bf cc 03 be           		jmp	ButtunProc	*
+0869 04c2 7a                 BTID04		dec	,X		*
+0870 04c3 cc 03 be           		jmp	ButtunProc	*
+0871                         
+0872 04c6 3d 40              BTID01		tst	Work3		*year inc/dec
+0873 04c8 27 0a              		beq	BTID05
+0874 04ca 3c 45              		inc	CLYear		*INC
+0875 04cc 3d 45              		tst	CLYear
+0876 04ce 26 0d              		bne	BTID06
+0877 04d0 3c 46              		inc	CLYear+1
+0878 04d2 20 09              		bra	BTID06
+0879 04d4 3a 45              BTID05		dec	CLYear		*dec
+0880 04d6 b6 45              		lda	CLYear
+0881 04d8 43                 		coma
+0882 04d9 26 02              		bne	BTID06
+0883 04db 3a 46              		dec	CLYear+1
+0884 04dd cc 03 be           BTID06		jmp	ButtunProc
+0885                         
+0886                         *--------------------------------------------------------------------
+0887                         *thread 2 exec entry
+0888                         Thread2Exec
+0889                         *--------------------------------------------------------------------
+0890                         *		jsr	THSwitch
+0891                         *--------------------------------------------------------------------
+0892                         *----clock display data make
+0893 04e0 cd 01 fb           CLDisplay	jsr	THSwitch
+0894 04e3 b6 4d              		lda	CLDispMode		*normal display
+0895 04e5 27 24              		beq	CLDisp24_jmp		* mode 0
+0896 04e7 4a                 		deca
+0897 04e8 27 24              		beq	CLDisp12_jmp		* mode 1
+0898 04ea 4a                 		deca
+0899 04eb 27 24              		beq	CLDispDate_jmp		* mode 2
+0900 04ed 4a                 		deca
+0901 04ee 27 24              		beq	CLDisp48_jmp		* mode 3
+0902 04f0 4a                 		deca
+0903 04f1 27 24              		beq	CLDispDT_jmp		* mode 4
+0904 04f3 4a                 		deca				*setup display
+0905 04f4 27 24              		beq	CLDispY_jmp		*
+0906 04f6 4a                 		deca				*
+0907 04f7 27 24              		beq	CLDispM_jmp		*
+0908 04f9 4a                 		deca				*
+0909 04fa 27 24              		beq	CLDispD_jmp		*
+0910 04fc 4a                 		deca				*
+0911 04fd 27 24              		beq	CLDispH_jmp		*
+0912 04ff 4a                 		deca				*
+0913 0500 27 24              		beq	CLDispMI_jmp		*
+0914 0502 4a                 		deca				*
+0915 0503 27 24              		beq	CLDispS_jmp		*
+0916 0505 4a                 		deca				*
+0917 0506 27 24              		beq	CLDispMS_jmp		*
+0918                         *no display
+0919 0508 cc 04 e0           		jmp	Thread2Exec
+0920 050b cc 05 2f           CLDisp24_jmp	jmp	CLDispTime24
+0921 050e cc 05 7a           CLDisp12_jmp	jmp	CLDispTime12
+0922 0511 cc 05 ab           CLDispDate_jmp	jmp	CLDispDate
+0923 0514 cc 05 e7           CLDisp48_jmp	jmp	CLDisp48
+0924 0517 cc 06 60           CLDispDT_jmp	jmp	CLDispDandT
+0925 051a cc 07 13           CLDispY_jmp	jmp	CLDispYear
+0926 051d cc 07 3f           CLDispM_jmp	jmp	CLDispMonth
+0927 0520 cc 07 58           CLDispD_jmp	jmp	CLDispDay
+0928 0523 cc 07 71           CLDispH_jmp	jmp	CLDispHour
+0929 0526 cc 07 8a           CLDispMI_jmp	jmp	CLDispMin
+0930 0529 cc 07 a3           CLDispS_jmp	jmp	CLDispSec
+0931 052c cc 07 bc           CLDispMS_jmp	jmp	CLDispMSec
+0932                         *clock display time only
+0933                         *hh:mm:ss.ms
+0934 052f cd 01 fb           CLDispTime24	jsr	THSwitch
+0935 0532 cd 06 fd           		jsr	CLDotBlank
+0936 0535 a6 1f              		lda	#VFDCHR_SPACE
+0937 0537 b7 34              		sta	VFDDigitValue
+0938 0539 b6 49              		lda	CLHou			*hour
+0939 053b cd 06 a5           		jsr	CLBin2Dec		*
+0940 053e b6 3e              		lda	Work1			*
+0941 0540 b7 35              		sta	VFDDigitValue+1		*
+0942 0542 b6 3d              		lda	Work0			*
+0943 0544 ba 41              		ora	Work4			*
+0944 0546 b7 36              		sta	VFDDigitValue+2		*
+0945 0548 b6 4a              CLDispMin24	lda	CLMin			*minutes
+0946 054a cd 06 a5           		jsr	CLBin2Dec		*
+0947 054d b6 3e              		lda	Work1			*
+0948 054f ba 42              		ora	Work5			*
+0949 0551 b7 37              		sta	VFDDigitValue+3		*
+0950 0553 b6 3d              		lda	Work0			*
+0951 0555 ba 41              		ora	Work4			*
+0952 0557 b7 38              		sta	VFDDigitValue+4		*
+0953 0559 b6 4b              		lda	CLSec			*seconds
+0954 055b cd 06 a5           		jsr	CLBin2Dec		*
+0955 055e b6 3e              		lda	Work1			*
+0956 0560 ba 42              		ora	Work5			*
+0957 0562 b7 39              		sta	VFDDigitValue+5		*
+0958 0564 b6 3d              		lda	Work0			*
+0959 0566 ba 43              		ora	Work6			*
+0960 0568 b7 3a              		sta	VFDDigitValue+6		*
+0961 056a b6 4c              		lda	CLmSec			*miliseconds
+0962 056c cd 06 a5           		jsr	CLBin2Dec		*
+0963 056f b6 3e              		lda	Work1			*
+0964 0571 b7 3b              		sta	VFDDigitValue+7		*
+0965 0573 b6 3d              		lda	Work0			*
+0966 0575 b7 3c              		sta	VFDDigitValue+8		*
+0967 0577 cc 04 e0           		jmp	Thread2Exec
+0968                         *APhh:mm:ss.ms
+0969 057a cd 01 fb           CLDispTime12	jsr	THSwitch
+0970 057d cd 06 fd           		jsr	CLDotBlank
+0971 0580 b6 49              		lda	CLHou			*hour
+0972 0582 a1 0c              		cmp	#12			*AM/PM check
+0973 0584 2b 1a              		bmi	CLDispT01		*branch AM
+0974 0586 ae 18              		ldx	#VFDCHR_P		*
+0975 0588 bf 34              		stx	VFDDigitValue		*
+0976 058a a0 0c              		sub	#12			*
+0977 058c 26 02              		bne	CLDispT00		*0->12
+0978 058e a6 0c              		lda	#12			*
+0979 0590 cd 06 a5           CLDispT00	jsr	CLBin2Dec		*
+0980 0593 b6 3e              		lda	Work1			*
+0981 0595 b7 35              		sta	VFDDigitValue+1		*
+0982 0597 b6 3d              		lda	Work0			*
+0983 0599 ba 41              		ora	Work4			*
+0984 059b b7 36              		sta	VFDDigitValue+2		*
+0985 059d cc 05 48           		jmp	CLDispMin24
+0986 05a0 ae 0a              CLDispT01	ldx	#VFDCHR_A		*
+0987 05a2 bf 34              		stx	VFDDigitValue		*
+0988 05a4 4d                 		tsta				*
+0989 05a5 26 e9              		bne	CLDispT00		*0->12
+0990 05a7 a6 0c              		lda	#12			*
+0991 05a9 20 e5              CLDispT02	bra	CLDispT00		*
+0992                         *clock display date only
+0993 05ab cd 01 fb           CLDispDate	jsr	THSwitch
+0994 05ae cd 06 fd           		jsr	CLDotBlank
+0995 05b1 ae 45              		ldx	#CLYear			*Year
+0996 05b3 cd 06 b3           		jsr	CLBin2Dec2		*
+0997 05b6 b6 40              		lda	Work3			*
+0998 05b8 b7 34              		sta	VFDDigitValue		*
+0999 05ba b6 3f              		lda	Work2			*
+1000 05bc b7 35              		sta	VFDDigitValue+1		*
+1001 05be b6 3e              		lda	Work1			*
+1002 05c0 b7 36              		sta	VFDDigitValue+2		*
+1003 05c2 b6 3d              		lda	Work0			*
+1004 05c4 b7 37              		sta	VFDDigitValue+3		*
+1005 05c6 a6 1f              		lda	#VFDCHR_SPACE
+1006 05c8 b7 38              		sta	VFDDigitValue+4
+1007 05ca b6 47              		lda	CLMon			*month
+1008 05cc cd 06 a5           		jsr	CLBin2Dec		*
+1009 05cf b6 3e              		lda	Work1			*
+1010 05d1 b7 39              		sta	VFDDigitValue+5		*
+1011 05d3 b6 3d              		lda	Work0			*
+1012 05d5 b7 3a              		sta	VFDDigitValue+6		*
+1013 05d7 b6 48              		lda	CLDay			*day
+1014 05d9 cd 06 a5           		jsr	CLBin2Dec		*
+1015 05dc b6 3e              		lda	Work1			*
+1016 05de b7 3b              		sta	VFDDigitValue+7		*
+1017 05e0 b6 3d              		lda	Work0			*
+1018 05e2 b7 3c              		sta	VFDDigitValue+8		*
+1019 05e4 cc 04 e0           		jmp	Thread2Exec
+1020                         *clock display day & 48houre time
+1021 05e7 cd 01 fb           CLDisp48	jsr	THSwitch
+1022 05ea cd 06 fd           		jsr	CLDotBlank
+1023 05ed b6 49              		lda	CLHou			*check 0-5 hour
+1024 05ef a1 05              		cmp	#5			*
+1025 05f1 2a 1f              		bpl	CLD48_07		*
+1026 05f3 b6 48              		lda	CLDay			*day check 1 or term
+1027 05f5 4a                 		deca				*
+1028 05f6 4a                 		deca				*
+1029 05f7 2a 1d              		bpl	CLD48_05		*
+1030 05f9 b6 47              CLD48_01	lda	CLMon			*befor month
+1031 05fb 4a                 		deca				*
+1032 05fc 26 02              		bne	CLD48_03		*year check
+1033 05fe a6 0b              		lda	#11			*
+1034 0600 b7 3d              CLD48_03	sta	Work0
+1035 0602 ab e0              		add	#CLMonthTable		*read monthly days
+1036 0604 97                 		tax				*
+1037 0605 fe                 		ldx	,X			*
+1038 0606 b6 3d              		lda	Work0			*leap 2 month 29day
+1039 0608 4a                 		deca				*
+1040 0609 26 04              		bne	CLD48_06		*
+1041 060b 07 31 0b           		brclr	CLBitLeapYear,THState,CLD48_02
+1042 060e 5c                 		incx
+1043 060f 9f                 CLD48_06	txa				*
+1044 0610 20 07              		bra	CLD48_02		*
+1045 0612 b6 48              CLD48_07	lda	CLDay			*normal
+1046 0614 20 03              		bra	CLD48_02		*
+1047 0616 b6 48              CLD48_05	lda	CLDay			*0 to 5 houre
+1048 0618 4a                 		deca
+1049 0619 cd 06 a5           CLD48_02	jsr	CLBin2Dec
+1050 061c b6 3e              		lda	Work1			*Day
+1051 061e b7 34              		sta	VFDDigitValue		*
+1052 0620 b6 3d              		lda	Work0			*
+1053 0622 b7 35              		sta	VFDDigitValue+1		*
+1054 0624 a6 1f              		lda	#VFDCHR_SPACE		*space
+1055 0626 b7 36              		sta	VFDDigitValue+2		*
+1056 0628 b6 49              		lda	CLHou			*hour
+1057 062a a1 05              		cmp	#5
+1058 062c 2a 02              		bpl	CLD48_04		*
+1059 062e ab 18              		add	#24
+1060 0630 cd 06 a5           CLD48_04	jsr	CLBin2Dec		*
+1061 0633 b6 3e              		lda	Work1			*
+1062 0635 b7 37              		sta	VFDDigitValue+3		*
+1063 0637 b6 3d              		lda	Work0			*
+1064 0639 ba 41              		ora	Work4			*
+1065 063b b7 38              		sta	VFDDigitValue+4		*
+1066 063d b6 4a              		lda	CLMin			*minutes
+1067 063f cd 06 a5           		jsr	CLBin2Dec		*
+1068 0642 b6 3e              		lda	Work1			*
+1069 0644 ba 42              		ora	Work5			*
+1070 0646 b7 39              		sta	VFDDigitValue+5		*
+1071 0648 b6 3d              		lda	Work0			*
+1072 064a ba 41              		ora	Work4			*
+1073 064c b7 3a              		sta	VFDDigitValue+6		*
+1074 064e b6 4b              		lda	CLSec			*seconds
+1075 0650 cd 06 a5           		jsr	CLBin2Dec		*
+1076 0653 b6 3e              		lda	Work1			*
+1077 0655 ba 42              		ora	Work5			*
+1078 0657 b7 3b              		sta	VFDDigitValue+7		*
+1079 0659 b6 3d              		lda	Work0			*
+1080 065b b7 3c              		sta	VFDDigitValue+8		*
+1081 065d cc 04 e0           		jmp	Thread2Exec
+1082                         *clock display month day houre minutes
+1083 0660 cd 01 fb           CLDispDandT	jsr	THSwitch
+1084 0663 cd 06 fd           		jsr	CLDotBlank
+1085 0666 b6 47              		lda	CLMon			*month
+1086 0668 cd 06 a5           		jsr	CLBin2Dec		*
+1087 066b b6 3e              		lda	Work1			*
+1088 066d b7 34              		sta	VFDDigitValue		*
+1089 066f b6 3d              		lda	Work0			*
+1090 0671 b7 35              		sta	VFDDigitValue+1		*
+1091 0673 b6 48              		lda	CLDay			*day
+1092 0675 cd 06 a5           		jsr	CLBin2Dec		*
+1093 0678 b6 3e              		lda	Work1			*
+1094 067a b7 36              		sta	VFDDigitValue+2		*
+1095 067c b6 3d              		lda	Work0			*
+1096 067e b7 37              		sta	VFDDigitValue+3		*
+1097 0680 a6 1f              		lda	#VFDCHR_SPACE		*space
+1098 0682 b7 38              		sta	VFDDigitValue+4		*
+1099 0684 b6 49              		lda	CLHou			*hour
+1100 0686 cd 06 a5           		jsr	CLBin2Dec		*
+1101 0689 b6 3e              		lda	Work1			*
+1102 068b b7 39              		sta	VFDDigitValue+5		*
+1103 068d b6 3d              		lda	Work0			*
+1104 068f ba 41              		ora	Work4			*
+1105 0691 b7 3a              		sta	VFDDigitValue+6		*
+1106 0693 b6 4a              		lda	CLMin			*minutes
+1107 0695 cd 06 a5           		jsr	CLBin2Dec		*
+1108 0698 b6 3e              		lda	Work1			*
+1109 069a ba 42              		ora	Work5			*
+1110 069c b7 3b              		sta	VFDDigitValue+7		*
+1111 069e b6 3d              		lda	Work0			*
+1112 06a0 b7 3c              		sta	VFDDigitValue+8		*
+1113 06a2 cc 04 e0           		jmp	Thread2Exec
+1114                         *binary byte to 2 decimal digit (0 - 99)
+1115                         * CALL A:binary
+1116                         * RETURN work0 lower digit : work1 upper digit
+1117                         * work0 work1 uses
+1118 06a5 3f 3e              CLBin2Dec	clr	Work1		*
+1119 06a7 97                 CLB2D00		tax			*a->x
+1120 06a8 a0 0a              		sub	#10		*a-10
+1121 06aa 2b 04              		bmi	CLB2D01		*a<0
+1122 06ac 3c 3e              		inc	Work1		*work0++
+1123 06ae 20 f7              		bra	CLB2D00		*
+1124 06b0 bf 3d              CLB2D01		stx 	Work0		*
+1125 06b2 81                 		rts			*
+1126                         *binary byte to 4 decimal digit (0 - 9999)
+1127                         * CALL X:binary address(2byte data)
+1128                         * RETURN work0-work3
+1129 06b3 3f 40              CLBin2Dec2	clr	Work3		*counter clear
+1130 06b5 3f 3f              		clr	Work2		*
+1131 06b7 f6                 		lda	,X		*data read
+1132 06b8 b7 43              		sta	Work6		*
+1133 06ba e6 01              		lda	1,x		*
+1134 06bc b7 44              		sta	Work7		*
+1135 06be a6 03              		lda	#$03		*set 1000
+1136 06c0 b7 42              		sta	Work5		*
+1137 06c2 a6 e8              		lda	#$E8		*
+1138 06c4 b7 41              		sta	Work4		*
+1139 06c6 b6 44              CLB2D200	lda	Work7		*1000
+1140 06c8 b7 3e              		sta	Work1		*
+1141 06ca b6 43              		lda	Work6		*
+1142 06cc b7 3d              		sta	Work0		*
+1143 06ce cd 01 d9           		jsr	LIBSub16	*
+1144 06d1 2b 04              		bmi	CLB2D201	*
+1145 06d3 3c 40              		inc	Work3		*
+1146 06d5 20 ef              		bra	CLB2D200	*
+1147 06d7 a6 00              CLB2D201	lda	#$00		*set 100
+1148 06d9 b7 42              		sta	Work5		*
+1149 06db a6 64              		lda	#$64		*
+1150 06dd b7 41              		sta	Work4		*
+1151 06df b6 3e              		lda	Work1		*
+1152 06e1 b7 44              		sta	Work7		*
+1153 06e3 b6 3d              		lda	Work0		*
+1154 06e5 b7 43              		sta	Work6		*
+1155 06e7 b6 44              CLB2D202	lda	Work7		*100
+1156 06e9 b7 3e              		sta	Work1		*
+1157 06eb b6 43              		lda	Work6		*
+1158 06ed b7 3d              		sta	Work0		*
+1159 06ef cd 01 d9           		jsr	LIBSub16	*
+1160 06f2 2b 04              		bmi	CLB2D203	*
+1161 06f4 3c 3f              		inc	Work2		*
+1162 06f6 20 ef              		bra	CLB2D202	*
+1163 06f8 b6 3d              CLB2D203	lda	Work0		*10
+1164 06fa ad a9              		bsr	CLBin2Dec
+1165 06fc 81                 		rts
+1166                         *dot blanking
+1167                         *
+1168 06fd 3f 41              CLDotBlank	clr	Work4
+1169 06ff 3f 42              		clr	Work5
+1170 0701 3f 43              		clr	Work6
+1171 0703 09 31 08           		brclr	THBitSecFlag,THState,CLDtBl01
+1172 0706 a6 a0              		lda	##VFDSegDp+VFDSegCom	*
+1173 0708 b7 41              		sta	Work4			*
+1174 070a a6 40              		lda	#VFDSegDush		*
+1175 070c b7 42              		sta	Work5			*
+1176 070e a6 80              CLDtBl01	lda	#VFDSegDp		*
+1177 0710 b7 43              		sta	Work6			*
+1178 0712 81                 		rts
+1179                         *setup display
+1180                         * year
+1181 0713 a6 1d              CLDispYear	lda	#VFDCHR_y
+1182 0715 b7 34              		sta	VFDDigitValue
+1183 0717 a6 0e              		lda	#VFDCHR_E
+1184 0719 b7 35              		sta	VFDDigitValue+1
+1185 071b a6 0a              		lda	#VFDCHR_A
+1186 071d b7 36              		sta	VFDDigitValue+2
+1187 071f a6 1a              		lda	#VFDCHR_r
+1188 0721 b7 37              		sta	VFDDigitValue+3
+1189 0723 a6 1f              		lda	#VFDCHR_SPACE
+1190 0725 b7 38              		sta	VFDDigitValue+4
+1191 0727 ae 45              		ldx	#CLYear
+1192 0729 cd 06 b3           		jsr	CLBin2Dec2
+1193 072c b6 40              		lda	Work3
+1194 072e b7 39              		sta	VFDDigitValue+5
+1195 0730 b6 3f              		lda	Work2
+1196 0732 b7 3a              		sta	VFDDigitValue+6
+1197 0734 b6 3e              		lda	Work1
+1198 0736 b7 3b              		sta	VFDDigitValue+7
+1199 0738 b6 3d              		lda	Work0
+1200 073a b7 3c              		sta	VFDDigitValue+8
+1201 073c cc 04 e0           		jmp	Thread2Exec		
+1202                         * month
+1203 073f a6 1a              CLDispMonth	lda	#VFDCHR_r
+1204 0741 b7 34              		sta	VFDDigitValue
+1205 0743 a6 16              		lda	#VFDCHR_n
+1206 0745 b7 35              		sta	VFDDigitValue+1
+1207 0747 a6 17              		lda	#VFDCHR_o
+1208 0749 b7 36              		sta	VFDDigitValue+2
+1209 074b a6 16              		lda	#VFDCHR_n
+1210 074d b7 37              		sta	VFDDigitValue+3
+1211 074f a6 1b              		lda	#VFDCHR_t
+1212 0751 b7 38              		sta	VFDDigitValue+4
+1213 0753 ae 47              		ldx	#CLMon
+1214 0755 cc 07 d5           		jmp	CLDispSetCommon
+1215                         * day
+1216 0758 a6 0d              CLDispDay	lda	#VFDCHR_d
+1217 075a b7 34              		sta	VFDDigitValue
+1218 075c a6 0a              		lda	#VFDCHR_A
+1219 075e b7 35              		sta	VFDDigitValue+1
+1220 0760 a6 1d              		lda	#VFDCHR_y
+1221 0762 b7 36              		sta	VFDDigitValue+2
+1222 0764 a6 1f              		lda	#VFDCHR_SPACE
+1223 0766 b7 37              		sta	VFDDigitValue+3
+1224 0768 a6 1f              		lda	#VFDCHR_SPACE
+1225 076a b7 38              		sta	VFDDigitValue+4
+1226 076c ae 48              		ldx	#CLDay
+1227 076e cc 07 d5           		jmp	CLDispSetCommon
+1228                         * hour
+1229 0771 a6 11              CLDispHour	lda	#VFDCHR_H
+1230 0773 b7 34              		sta	VFDDigitValue
+1231 0775 a6 17              		lda	#VFDCHR_o
+1232 0777 b7 35              		sta	VFDDigitValue+1
+1233 0779 a6 1c              		lda	#VFDCHR_u
+1234 077b b7 36              		sta	VFDDigitValue+2
+1235 077d a6 1a              		lda	#VFDCHR_r
+1236 077f b7 37              		sta	VFDDigitValue+3
+1237 0781 a6 1f              		lda	#VFDCHR_SPACE
+1238 0783 b7 38              		sta	VFDDigitValue+4
+1239 0785 ae 49              		ldx	#CLHou
+1240 0787 cc 07 d5           		jmp	CLDispSetCommon
+1241                         *minitu
+1242 078a a6 1a              CLDispMin	lda	#VFDCHR_r
+1243 078c b7 34              		sta	VFDDigitValue
+1244 078e a6 16              		lda	#VFDCHR_n
+1245 0790 b7 35              		sta	VFDDigitValue+1
+1246 0792 a6 12              		lda	#VFDCHR_i
+1247 0794 b7 36              		sta	VFDDigitValue+2
+1248 0796 a6 16              		lda	#VFDCHR_n
+1249 0798 b7 37              		sta	VFDDigitValue+3
+1250 079a a6 1f              		lda	#VFDCHR_SPACE
+1251 079c b7 38              		sta	VFDDigitValue+4
+1252 079e ae 4a              		ldx	#CLMin
+1253 07a0 cc 07 d5           		jmp	CLDispSetCommon
+1254                         *second
+1255 07a3 a6 05              CLDispSec	lda	#VFDCHR_5
+1256 07a5 b7 34              		sta	VFDDigitValue
+1257 07a7 a6 0e              		lda	#VFDCHR_E
+1258 07a9 b7 35              		sta	VFDDigitValue+1
+1259 07ab a6 0c              		lda	#VFDCHR_c
+1260 07ad b7 36              		sta	VFDDigitValue+2
+1261 07af a6 1f              		lda	#VFDCHR_SPACE
+1262 07b1 b7 37              		sta	VFDDigitValue+3
+1263 07b3 a6 1f              		lda	#VFDCHR_SPACE
+1264 07b5 b7 38              		sta	VFDDigitValue+4
+1265 07b7 ae 4b              		ldx	#CLSec
+1266 07b9 cc 07 d5           		jmp	CLDispSetCommon
+1267                         *milisecond
+1268 07bc a6 1a              CLDispMSec	lda	#VFDCHR_r
+1269 07be b7 34              		sta	VFDDigitValue
+1270 07c0 a6 16              		lda	#VFDCHR_n
+1271 07c2 b7 35              		sta	VFDDigitValue+1
+1272 07c4 a6 12              		lda	#VFDCHR_i
+1273 07c6 b7 36              		sta	VFDDigitValue+2
+1274 07c8 a6 01              		lda	#VFDCHR_1
+1275 07ca b7 37              		sta	VFDDigitValue+3
+1276 07cc a6 12              		lda	#VFDCHR_i
+1277 07ce b7 38              		sta	VFDDigitValue+4
+1278 07d0 ae 4c              		ldx	#CLmSec
+1279 07d2 cc 07 d5           		jmp	CLDispSetCommon
+1280                         *common rutin
+1281                         * x reg value address
+1282                         CLDispSetCommon
+1283 07d5 f6                 		lda	,X
+1284 07d6 cd 06 a5           		jsr	CLBin2Dec
+1285 07d9 a6 1f              		lda	#VFDCHR_SPACE
+1286 07db b7 39              		sta	VFDDigitValue+5
+1287 07dd a6 1f              		lda	#VFDCHR_SPACE
+1288 07df b7 3a              		sta	VFDDigitValue+6
+1289 07e1 b6 3e              		lda	Work1
+1290 07e3 b7 3b              		sta	VFDDigitValue+7
+1291 07e5 b6 3d              		lda	Work0
+1292 07e7 b7 3c              		sta	VFDDigitValue+8
+1293 07e9 cc 04 e0           		jmp	Thread2Exec
+1294                         
+1295                         *--------------------------------------------------------------------
+1296                         *thread 3 exec entry
+1297                         Thread3Exec
+1298                         *--------------------------------------------------------------------
+1299                         *		jsr	THSwitch
+1300                         *		bra	Thread3Exec
+1301                         *UART MODULE
+1302                         * 19.2kbps
+1303                         UARTTask
+1304 07ec cd 01 fb           		jsr	THSwitch
+1305                         *Send process
+1306 07ef cd 08 b3           UARTTxTask	jsr	UARTTxEmptyCheck	*check send data request
+1307 07f2 24 3e              		bcc	UARTRxTask		*no request goto rx process
+1308 07f4 9b                 		sei				*irq disable
+1309 07f5 02 03 36           UARTTx00	brset	CTSIN,PortD,UARTTxEnd	*check hand shake
+1310 07f8 cd 08 ea           		jsr	UARTTxRead		*buffer read
+1311 07fb 97                 		tax				*
+1312 07fc a6 08              		lda	#$8			*send bit count value
+1313 07fe 19 02              		bclr	TXOUT,PortC		*7 start bit
+1314 0800 9d                 		nop				*2 wait
+1315 0801 9d                 		nop				*2 wait
+1316 0802 9d                 		nop				*2 wait
+1317 0803 9d                 		nop				*2 wait
+1318 0804 9d                 		nop				*2 wait
+1319 0805 cd 08 8e           		jsr	UARTWait27		*27 wait
+1320 0808 56                 UARTTx01	rorx				*4 data shift
+1321 0809 24 04              		bcc	UARTTx02		*4 data 0/1 check
+1322 080b 18 02              		bset	TXOUT,PortC		*7 out data 1
+1323 080d 20 04              		bra	UARTTx03		*4
+1324 080f 19 02              UARTTx02	bclr	TXOUT,PortC		*7 out data 0
+1325 0811 9d                 		nop				*2 wait
+1326 0812 9d                 		nop				*2 wait
+1327 0813 cd 08 8e           UARTTx03	jsr	UARTWait27		*27 wait
+1328 0816 a0 01              		sub	#$01			*2 bit shift count
+1329 0818 26 ee              		bne	UARTTx01		*4 shift loop check
+1330 081a 9d                 		nop				*2 wait
+1331 081b 9d                 		nop				*2 wait
+1332 081c 18 02              		bset	TXOUT,PortC		*7 stop bit
+1333 081e cd 08 8e           		jsr	UARTWait27		*27 wait
+1334 0821 cd 08 8f           		jsr	UARTWait25		*25 wait
+1335 0824 9a                 		cli				*irq enable
+1336 0825 cd 01 fb           		jsr	THSwitch		* switch thread
+1337 0828 9b                 		sei				*irq disable
+1338 0829 cd 08 b3           		jsr	UARTTxEmptyCheck	*
+1339 082c 25 c7              		bcs	UARTTx00		*
+1340 082e 9a                 UARTTxEnd	cli				*irq enable
+1341 082f cd 01 fb           		jsr	THSwitch		* switch thread
+1342                         *Recieve process
+1343                         UARTRxTask
+1344 0832 cd 08 bd           		jsr	UARTRxEmptyCheck
+1345 0835 25 41              		bcs	UARTRxEnd
+1346 0837 9b                 		sei				*irq disable
+1347 0838 a6 1c              		lda	#28			*check loop wait time value
+1348 083a 1b 02              		bclr	RTSOUT,PortC		*RTS enable
+1349 083c 01 03 08           UARTRx00	brclr	RXIN,PortD,UARTRx01	*10 check start bit
+1350 083f a0 01              		sub	#$01			*2   loop time 104uS
+1351 0841 26 f9              		bne	UARTRx00		*4
+1352 0843 1a 02              		bset	RTSOUT,PortC		*RTS disable
+1353 0845 20 31              		bra	UARTRxEnd		*
+1354 0847 1a 02              UARTRx01	bset	RTSOUT,PortC		*7 RTS disable
+1355 0849 ad 43              		bsr	UARTWait27		*20
+1356 084b ad 2f              		bsr	UARTRxSub		*28
+1357 084d ad 45              		bsr	UARTWait24		*24
+1358 084f ad 2b              		bsr	UARTRxSub		*28
+1359 0851 ad 41              		bsr	UARTWait24		*24
+1360 0853 ad 27              		bsr	UARTRxSub		*28
+1361 0855 ad 3d              		bsr	UARTWait24		*24
+1362 0857 ad 23              		bsr	UARTRxSub		*28
+1363 0859 ad 3b              		bsr	UARTWait20		*20
+1364 085b ad 1f              		bsr	UARTRxSub		*28
+1365 085d ad 37              		bsr	UARTWait20		*20
+1366 085f ad 1b              		bsr	UARTRxSub		*28
+1367 0861 ad 32              		bsr	UARTWait22		*22
+1368 0863 ad 17              		bsr	UARTRxSub		*28
+1369 0865 ad 2e              		bsr	UARTWait22		*22
+1370 0867 ad 13              		bsr	UARTRxSub		*28
+1371 0869 ad 2a              		bsr	UARTWait22		*22
+1372 086b ad 19              		bsr	UARTWait52		*52
+1373 086d 9a                 UARTRx05	cli				*irq enable
+1374 086e cd 08 ff           		jsr	UARTRxWrite		*write buffer
+1375 0871 24 05              		bcc	UARTRxEnd		*
+1376 0873 cd 01 fb           		jsr	THSwitch		*buffer write retry
+1377 0876 20 f5              		bra	UARTRx05		*
+1378 0878 9a                 UARTRxEnd	cli				*irq enable
+1379 0879 cc 07 ec           		jmp	UARTTask
+1380                         
+1381 087c 44                 UARTRxSub	lsra				*2  total 28 clock
+1382 087d 01 03 03           		brclr	RXIN,PortD,UARTRxS00	*10
+1383 0880 aa 80              		ora	#$80			*2
+1384 0882 81                 		rts				*6
+1385 0883 a4 7f              UARTRxS00	and	#$7f			*2
+1386 0885 81                 UARTRxSub01	rts				*6 
+1387                         
+1388                         *uart wait subrutin
+1389 0886 9d                 UARTWait52	nop				*2
+1390 0887 9d                 UARTWait50	nop				*2
+1391 0888 10 31              UARTWait48	bset	THBitWaitDummy,THState	*7
+1392 088a 10 31              		bset	THBitWaitDummy,THState	*7
+1393 088c 10 31              UARTWait34	bset	THBitWaitDummy,THState	*7
+1394 088e 9d                 UARTWait27	nop				*2 2
+1395 088f 9d                 UARTWait25	nop				*2 4
+1396 0890 9d                 UARTWait23	nop				*2 6
+1397 0891 11 31              		bclr	THBitWaitDummy,THState	*7 13
+1398 0893 81                 		rts				*6 19 + bsr 8 = 27
+1399 0894 9d                 UARTWait24	nop				*2
+1400 0895 9d                 UARTWait22	nop				*2
+1401 0896 9d                 UARTWait20	nop				*2
+1402 0897 9d                 UARTWait18	nop				*2
+1403 0898 9d                 UARTWait16	nop				*2
+1404 0899 81                 UARTWait14	rts				*6
+1405                         
+1406                         *uart init subrutin
+1407 089a 18 02              UARTInit	bset	TXOUT,PortC
+1408 089c 1a 02              		bset	RTSOUT,PortC
+1409 089e 3f 59              		clr	UARTTxWPtr
+1410 08a0 3f 5a              		clr	UARTTxRPtr
+1411 08a2 3f 5b              		clr	UARTRxWPtr
+1412 08a4 3f 5c              		clr	UARTRxRPtr
+1413 08a6 3f 51              		clr	UARTTxBuff
+1414 08a8 3f 52              		clr	UARTTxBuff+1
+1415 08aa 3f 53              		clr	UARTTxBuff+2
+1416 08ac 3f 54              		clr	UARTTxBuff+3
+1417 08ae 3f 55              		clr	UARTRxBuff
+1418 08b0 3f 56              		clr	UARTRxBuff+1
+1419 08b2 81                 		rts
+1420                         
+1421                         *check txbuffer
+1422                         * cflag 0:empty 1:not empty
+1423                         UARTTxEmptyCheck
+1424 08b3 b6 5a              		lda	UARTTxRPtr
+1425 08b5 b1 59              		cmp	UARTTxWPtr
+1426 08b7 27 02              		beq	UARTTxECK00
+1427 08b9 99                 		sec
+1428 08ba 81                 		rts
+1429 08bb 98                 UARTTxECK00	clc
+1430 08bc 81                 		rts
+1431                         *check rxbuffer
+1432                         * cflag 0:empty 1:not empty
+1433                         UARTRxEmptyCheck
+1434 08bd b6 5b              		lda	UARTRxWPtr
+1435 08bf 4c                 		inca
+1436 08c0 a4 03              		and	#$03
+1437 08c2 b1 5c              		cmp	UARTRxRPtr
+1438 08c4 26 02              		bne	UARTRxECK00
+1439 08c6 99                 		sec
+1440 08c7 81                 		rts
+1441 08c8 98                 UARTRxECK00	clc
+1442 08c9 81                 		rts
+1443                         *Tx write buffer 1 byte
+1444                         * A<-data
+1445                         * CFlag->0:success 1:failure
+1446                         UARTTxWrite	
+1447 08ca 97                 		tax				*
+1448 08cb b6 59              		lda	UARTTxWPtr		*buffer check
+1449 08cd 4c                 		inca				*
+1450 08ce a4 03              		and	#$03			*
+1451 08d0 b1 5a              		cmp	UARTTxRPtr		*
+1452 08d2 27 13              		beq	UARTTxW00		*buffer full
+1453 08d4 b6 59              		lda	UARTTxWPtr		*buffer address calc
+1454 08d6 ab 51              		add	#UARTTxBuff		*
+1455 08d8 b7 44              		sta	Work7			*
+1456 08da b6 59              		lda	UARTTxWPtr		*inc write pointer
+1457 08dc 4c                 		inca				*
+1458 08dd a4 03              		and	#$03			*
+1459 08df b7 59              		sta	UARTTxWPtr		*
+1460 08e1 9f                 		txa				*write buffer data address recav
+1461 08e2 be 44              		ldx	Work7			*
+1462 08e4 f7                 		sta	,X			*set data
+1463 08e5 98                 		clc				*c flag clear
+1464 08e6 81                 		rts				*
+1465 08e7 9f                 UARTTxW00	txa				*
+1466 08e8 99                 		sec				*c flag set
+1467 08e9 81                 		rts				*
+1468                         *Tx read buffer 1 byte
+1469                         * A<-data
+1470                         * Cflag<-0:empty 1:read success
+1471                         UARTTxRead
+1472 08ea ad c7              		bsr	UARTTxEmptyCheck	*check buffer empty
+1473 08ec 24 10              		bcc	UARTTxR00		*
+1474 08ee b6 5a              		lda	UARTTxRPtr		*
+1475 08f0 ab 51              		add	#UARTTxBuff		*
+1476 08f2 97                 		tax				*
+1477 08f3 f6                 		lda	,X			*
+1478 08f4 97                 		tax				*
+1479 08f5 b6 5a              		lda	UARTTxRPtr		*
+1480 08f7 4c                 		inca				*
+1481 08f8 a4 03              		and	#$03			*
+1482 08fa b7 5a              		sta	UARTTxRPtr		*
+1483 08fc 9f                 		txa				*
+1484 08fd 99                 		sec				*set c flag
+1485 08fe 81                 UARTTxR00	rts				*
+1486                         *Rx write buffer 1 byte
+1487                         * A<-data
+1488                         * CFlag->0:success 1:failure
+1489                         UARTRxWrite
+1490 08ff 97                 		tax				*
+1491 0900 b6 5b              		lda	UARTRxWPtr		*buffer check
+1492 0902 4c                 		inca				*
+1493 0903 a4 03              		and	#$03			*
+1494 0905 b1 5c              		cmp	UARTRxRPtr		*
+1495 0907 27 13              		beq	UARTRxW00		*buffer full
+1496 0909 b6 5b              		lda	UARTRxWPtr		*
+1497 090b ab 55              		add	#UARTRxBuff		*
+1498 090d b7 44              		sta	Work7			*
+1499 090f b6 5b              		lda	UARTRxWPtr		*
+1500 0911 4c                 		inca				*
+1501 0912 a4 03              		and	#$03			*
+1502 0914 b7 5b              		sta	UARTRxWPtr		*
+1503 0916 9f                 		txa				*
+1504 0917 be 44              		ldx	Work7			*
+1505 0919 f7                 		sta	,X			*set data
+1506 091a 98                 		clc				*c flag clear
+1507 091b 81                 		rts				*
+1508 091c 9f                 UARTRxW00	txa				*
+1509 091d 99                 		sec				*c flag set
+1510 091e 81                 		rts				*
+1511                         *Rx read buffer 1 byte
+1512                         * A<-data
+1513                         * Cflag<-0:empty 1:read success
+1514                         UARTRxRead
+1515 091f b6 5c              		lda	UARTRxRPtr		*check buffer empty
+1516 0921 b1 5b              		cmp	UARTRxWPtr		*
+1517 0923 27 11              		beq	UARTRxR00		*
+1518 0925 b6 5c              		lda	UARTRxRPtr		*
+1519 0927 ab 55              		add	#UARTRxBuff		*
+1520 0929 97                 		tax				*
+1521 092a f6                 		lda	,X			*
+1522 092b 97                 		tax				*
+1523 092c b6 5c              		lda	UARTRxRPtr		*
+1524 092e 4c                 		inca				*
+1525 092f a4 03              		and	#$03			*
+1526 0931 b7 5c              		sta	UARTRxRPtr		*
+1527 0933 9f                 		txa				*
+1528 0934 99                 		sec				*set c flag
+1529 0935 81                 		rts				*
+1530 0936 98                 UARTRxR00	clc				*
+1531 0937 81                 		rts				*
+1532                         
+1533                         *--------------------------------------------------------------------
+1534                         *mini monitor
+1535                         *--------------------------------------------------------------------
+1536 0938 cd 01 fb           MonitorTask	jsr	THSwitch
+1537                         *check swi
+1538 093b 3d 6b              		tst	MonSWIFlag
+1539 093d 27 5b              		beq	MonitorCmdLine
+1540                         *swi display
+1541 093f 3f 6b              		clr	MonSWIFlag
+1542 0941 a6 09              Monswi00	lda	#Monswi01/256		*swi reg=> display out
+1543 0943 b7 63              		sta	MonWork+6		*
+1544 0945 a6 50              		lda	#Monswi01&$FF		*
+1545 0947 b7 64              		sta	MonWork+7		*
+1546 0949 ae 0d              		ldx	#MonitorData09/256	*
+1547 094b a6 6e              		lda	#MonitorData09&$FF	*
+1548 094d cc 0c 79           		jmp	MonitorStrSend		*
+1549 0950 a6 09              Monswi01	lda	#Monswi02/256		*A= display out
+1550 0952 b7 63              		sta	MonWork+6		*
+1551 0954 a6 5f              		lda	#Monswi02&$FF		*
+1552 0956 b7 64              		sta	MonWork+7		*
+1553 0958 ae 0d              		ldx	#MonitorData05/256	*
+1554 095a a6 5c              		lda	#MonitorData05&$FF	*
+1555 095c cc 0c 79           		jmp	MonitorStrSend		*
+1556 095f a6 09              Monswi02	lda	#Monswi03/256		*A reg value display out
+1557 0961 b7 63              		sta	MonWork+6		*
+1558 0963 a6 6f              		lda	#Monswi03&$FF		*
+1559 0965 b7 64              		sta	MonWork+7		*
+1560 0967 ae 69              		ldx	#MonRegA		*
+1561 0969 cd 01 65           		jsr	Bin2Ascii		*
+1562 096c cc 0c 53           		jmp	Monitor2Send		*
+1563 096f a6 09              Monswi03	lda	#Monswi04/256		*X= display out
+1564 0971 b7 63              		sta	MonWork+6		*
+1565 0973 a6 7e              		lda	#Monswi04&$FF		*
+1566 0975 b7 64              		sta	MonWork+7		*
+1567 0977 ae 0d              		ldx	#MonitorData06/256	*
+1568 0979 a6 60              		lda	#MonitorData06&$FF	*
+1569 097b cc 0c 79           		jmp	MonitorStrSend		*
+1570 097e a6 09              Monswi04	lda	#Monswi05/256		*X reg value display out
+1571 0980 b7 63              		sta	MonWork+6		*
+1572 0982 a6 8e              		lda	#Monswi05&$FF		*
+1573 0984 b7 64              		sta	MonWork+7		*
+1574 0986 ae 6a              		ldx	#MonRegX		*
+1575 0988 cd 01 65           		jsr	Bin2Ascii		*
+1576 098b cc 0c 53           		jmp	Monitor2Send		*
+1577 098e a6 0d              Monswi05	lda	#$0d			*command line enter
+1578 0990 cd 08 ca           		jsr	UARTTxWrite		*
+1579 0993 24 64              		bcc	MonitorEnd		*
+1580 0995 cd 01 fb           		jsr	THSwitch		*
+1581 0998 20 f4              		bra	Monswi05		*
+1582                         *command line input
+1583 099a cd 09 1f           MonitorCmdLine	jsr	UARTRxRead		*check input
+1584 099d 24 78              		bcc	MonEnd00		*
+1585 099f b7 3d              		sta	Work0			*
+1586 09a1 a1 0d              		cmp	#$0d			*enter
+1587 09a3 27 75              		beq	MonitorEnter		*
+1588 09a5 a1 0a              		cmp	#$0a			*enter
+1589 09a7 27 71              		beq	MonitorEnter		*
+1590 09a9 a1 08              		cmp	#$08			*BS key
+1591 09ab 27 1c              		beq	MonitorBS		*
+1592 09ad b6 65              		lda	MonInpCnt		*input buffer empty check
+1593 09af a1 08              		cmp	#$08			*
+1594 09b1 2b 02              		bmi	MonitorInBuff		*
+1595 09b3 20 62              		bra	MonEnd00		*
+1596 09b5 b6 65              MonitorInBuff	lda	MonInpCnt		*
+1597 09b7 ab 5d              		add	#MonWork		*add input buffer
+1598 09b9 97                 		tax				*
+1599 09ba b6 3d              		lda	Work0			*
+1600 09bc f7                 		sta	,X			*
+1601 09bd 3c 65              		inc	MonInpCnt		*inc input counter
+1602 09bf cd 08 ca           MonitorIn00	jsr	UARTTxWrite		*
+1603 09c2 24 53              		bcc	MonEnd00		*
+1604 09c4 cd 01 fb           		jsr	THSwitch		*
+1605 09c7 20 f6              		bra	MonitorIn00		*
+1606 09c9 b6 65              MonitorBS	lda	MonInpCnt		*check inpuit counter
+1607 09cb a1 00              		cmp	#$00			*
+1608 09cd 23 48              		bls	MonEnd00		*
+1609 09cf 3a 65              		dec	MonInpCnt		*dec counter
+1610 09d1 be 65              		ldx	MonInpCnt		*
+1611 09d3 6f 5d              		clr	MonWork,X		*clear
+1612 09d5 a6 08              		lda	#$08			*
+1613 09d7 cd 08 ca           MonitorBS00	jsr	UARTTxWrite		*
+1614 09da 24 05              		bcc	MonitorBS01		*
+1615 09dc cd 01 fb           		jsr	THSwitch		*
+1616 09df 20 f6              		bra	MonitorBS00		*
+1617 09e1 a6 20              MonitorBS01	lda	#$20			*
+1618 09e3 cd 08 ca           MonitorBS02	jsr	UARTTxWrite		*
+1619 09e6 24 05              		bcc	MonitorBS03		*
+1620 09e8 cd 01 fb           		jsr	THSwitch		*
+1621 09eb 20 f6              		bra	MonitorBS02		*
+1622 09ed a6 08              MonitorBS03	lda	#$08			*
+1623 09ef cd 08 ca           MonitorBS04	jsr	UARTTxWrite		*
+1624 09f2 24 23              		bcc	MonEnd00		*
+1625 09f4 cd 01 fb           		jsr	THSwitch		*
+1626 09f7 20 f6              		bra	MonitorBS04		*
+1627 09f9 3f 65              MonitorEnd	clr	MonInpCnt		*input counter clear
+1628 09fb 3f 5d              		clr	MonWork			*
+1629 09fd 3f 5e              		clr	MonWork+1		*
+1630 09ff 3f 5f              		clr	MonWork+2		*
+1631 0a01 3f 60              		clr	MonWork+3		*
+1632 0a03 3f 61              		clr	MonWork+4		*
+1633 0a05 3f 62              		clr	MonWork+5		*
+1634 0a07 3f 63              		clr	MonWork+6		*
+1635 0a09 3f 64              		clr	MonWork+7		*
+1636 0a0b a6 3e              		lda	#$3e			*prompt char display
+1637 0a0d cd 08 ca           		jsr	UARTTxWrite		*
+1638 0a10 24 05              		bcc	MonEnd00		*
+1639 0a12 cd 01 fb           		jsr	THSwitch		*
+1640 0a15 20 e2              		bra	MonitorEnd		*
+1641 0a17 cc 03 be           MonEnd00	jmp	ButtunProc		*
+1642 0a1a a6 0d              MonitorEnter	lda	#$0d			*command line enter
+1643 0a1c cd 08 ca           		jsr	UARTTxWrite		*
+1644 0a1f 24 05              		bcc	Monitor00		*
+1645 0a21 cd 01 fb           		jsr	THSwitch		*
+1646 0a24 20 f4              		bra	MonitorEnter		*
+1647 0a26 3d 65              Monitor00	tst	MonInpCnt		*command check
+1648 0a28 27 cf              		beq	MonitorEnd		*
+1649 0a2a b6 5d              		lda	MonWork			*branch command
+1650 0a2c a1 64              		cmp	#$64			*d dump
+1651 0a2e 27 27              		beq	MonDump
+1652 0a30 a1 74              		cmp	#$74			*t thread
+1653 0a32 27 26              		beq	MonThread
+1654 0a34 a1 78              		cmp	#$78			*x execute
+1655 0a36 27 25              		beq	MonJmp
+1656 0a38 a1 63              		cmp	#$63			*c call
+1657 0a3a 27 24              		beq	MonSubCall
+1658 0a3c a1 77              		cmp	#$77			*w memory write
+1659 0a3e 27 23              		beq	MonWrite
+1660 0a40 a1 68              		cmp	#$68			*h help
+1661 0a42 27 22              		beq	MonHelpExec
+1662 0a44 a1 3f              		cmp	#$3f			*? help
+1663 0a46 27 1e              		beq	MonHelpExec
+1664 0a48 a6 09              		lda	#MonitorEnd/256		*command erroe display
+1665 0a4a b7 63              		sta	MonWork+6		*
+1666 0a4c a6 f9              		lda	#MonitorEnd&$FF		*
+1667 0a4e b7 64              		sta	MonWork+7		*
+1668 0a50 ae 0d              		ldx	#MonitorData03/256	*
+1669 0a52 a6 42              		lda	#MonitorData03&$FF	*
+1670 0a54 cc 0c 79           		jmp	MonitorStrSend		*
+1671 0a57 cc 0a aa           MonDump		jmp	MonDumpExec		*jump
+1672 0a5a cc 0b 4c           MonThread	jmp	MonThreadExec		*
+1673 0a5d cc 0a 78           MonJmp		jmp	MonJmpExec		*
+1674 0a60 cc 0a 8b           MonSubCall	jmp	MonCallExec		*
+1675 0a63 cc 0b 35           MonWrite	jmp	MonWriteExec		*
+1676                         *help message
+1677 0a66 a6 0a              MonHelpExec	lda	#MonHelp00/256		*help display out
+1678 0a68 b7 63              		sta	MonWork+6		*
+1679 0a6a a6 75              		lda	#MonHelp00&$FF		*
+1680 0a6c b7 64              		sta	MonWork+7		*
+1681 0a6e ae 0d              		ldx	#MonitorDataHlp/256	*
+1682 0a70 a6 79              		lda	#MonitorDataHlp&$FF	*
+1683 0a72 cc 0c 79           		jmp	MonitorStrSend		*
+1684 0a75 cc 09 f9           MonHelp00	jmp	MonitorEnd		*
+1685                         *execute
+1686 0a78 ae 5e              MonJmpExec	ldx	#MonWork+1		*16bit address
+1687 0a7a cd 01 7e           		jsr	Hex2Bin			*Hex to binary
+1688 0a7d a6 cc              		lda	#$cc			*jmp command set
+1689 0a7f b7 5d              		sta	MonWork			*
+1690 0a81 b6 3d              		lda	Work0			*
+1691 0a83 b7 5e              		sta	MonWork+1		*
+1692 0a85 b6 3e              		lda	Work1			*
+1693 0a87 b7 5f              		sta	MonWork+2		*
+1694 0a89 bc 5d              		jmp	MonWork			*
+1695                         *sub routin call
+1696 0a8b ae 5e              MonCallExec	ldx	#MonWork+1		*16bit address
+1697 0a8d cd 01 7e           		jsr	Hex2Bin			*Hex to binary
+1698 0a90 a6 cd              		lda	#$cd			*jmp command set
+1699 0a92 b7 5d              		sta	MonWork			*
+1700 0a94 b6 3d              		lda	Work0			*
+1701 0a96 b7 5e              		sta	MonWork+1		*
+1702 0a98 b6 3e              		lda	Work1			*
+1703 0a9a b7 5f              		sta	MonWork+2		*
+1704 0a9c a6 cc              		lda	#$cc			*
+1705 0a9e b7 60              		sta	MonWork+3		*
+1706 0aa0 a6 09              		lda	#MonitorEnd/256		*
+1707 0aa2 b7 61              		sta	MonWork+4		*
+1708 0aa4 a6 f9              		lda	#MonitorEnd&$FF		*
+1709 0aa6 b7 62              		sta	MonWork+5		*
+1710 0aa8 bc 5d              		jmp	MonWork			*
+1711                         *Memory dump
+1712 0aaa a6 0a              MonDumpExec	lda	#MonDump00/256		*offset line display out
+1713 0aac b7 63              		sta	MonWork+6		*
+1714 0aae a6 b9              		lda	#MonDump00&$FF		*
+1715 0ab0 b7 64              		sta	MonWork+7		*
+1716 0ab2 ae 0c              		ldx	#MonitorData01/256	*
+1717 0ab4 a6 d3              		lda	#MonitorData01&$FF	*
+1718 0ab6 cc 0c 79           		jmp	MonitorStrSend		*
+1719 0ab9 a6 0a              MonDump00	lda	#MonDump01/256		*separate line display out
+1720 0abb b7 63              		sta	MonWork+6		*
+1721 0abd a6 c8              		lda	#MonDump01&$FF		*
+1722 0abf b7 64              		sta	MonWork+7		*
+1723 0ac1 ae 0d              		ldx	#MonitorData02/256	*
+1724 0ac3 a6 0b              		lda	#MonitorData02&$FF	*
+1725 0ac5 cc 0c 79           		jmp	MonitorStrSend		*
+1726 0ac8 3f 5d              MonDump01	clr	MonWork			*address count clear
+1727 0aca 3f 5e              		clr	MonWork+1		*
+1728 0acc a6 0a              MonDump02	lda	#MonDump03/256		*
+1729 0ace b7 63              		sta	MonWork+6		*
+1730 0ad0 a6 dc              		lda	#MonDump03&$FF		*
+1731 0ad2 b7 64              		sta	MonWork+7		*
+1732 0ad4 ae 5d              		ldx	#MonWork		*address msb out
+1733 0ad6 cd 01 65           		jsr	Bin2Ascii		*
+1734 0ad9 cc 0c 53           		jmp	Monitor2Send		*out
+1735 0adc a6 0a              MonDump03	lda	#MonDump04/256		*
+1736 0ade b7 63              		sta	MonWork+6		*
+1737 0ae0 a6 ec              		lda	#MonDump04&$FF		*
+1738 0ae2 b7 64              		sta	MonWork+7		*
+1739 0ae4 ae 5e              		ldx	#MonWork+1		*address lsb out
+1740 0ae6 cd 01 65           		jsr	Bin2Ascii		*
+1741 0ae9 cc 0c 53           		jmp	Monitor2Send		*out
+1742 0aec a6 0a              MonDump04	lda	#MonDump05/256		*
+1743 0aee b7 63              		sta	MonWork+6		*
+1744 0af0 a6 f9              		lda	#MonDump05&$FF		*
+1745 0af2 b7 64              		sta	MonWork+7		*
+1746 0af4 a6 7c              		lda	#$7c			*|send
+1747 0af6 cc 0c 39           		jmp	Monitor1Send		*
+1748 0af9 a6 0b              MonDump05	lda	#MonDump06/256		*
+1749 0afb b7 63              		sta	MonWork+6		*
+1750 0afd a6 09              		lda	#MonDump06&$FF		*
+1751 0aff b7 64              		sta	MonWork+7		*
+1752 0b01 be 5e              		ldx	MonWork+1		*byte data out
+1753 0b03 cd 01 65           		jsr	Bin2Ascii		*
+1754 0b06 cc 0c 53           		jmp	Monitor2Send		*
+1755 0b09 3c 5e              MonDump06	inc	MonWork+1		*address inc
+1756 0b0b b6 5e              		lda	MonWork+1		*check 16 byte
+1757 0b0d a4 0f              		and	#$0f			*
+1758 0b0f 27 0d              		beq	MonDump07		*next line
+1759 0b11 a6 0a              		lda	#MonDump05/256		*space out
+1760 0b13 b7 63              		sta	MonWork+6		*
+1761 0b15 a6 f9              		lda	#MonDump05&$FF		*
+1762 0b17 b7 64              		sta	MonWork+7		*
+1763 0b19 a6 20              		lda	#$20			*space send
+1764 0b1b cc 0c 39           		jmp	Monitor1Send		*
+1765 0b1e a6 0b              MonDump07	lda	#MonDump08/256		*cr out
+1766 0b20 b7 63              		sta	MonWork+6		*
+1767 0b22 a6 2b              		lda	#MonDump08&$FF		*
+1768 0b24 b7 64              		sta	MonWork+7		*
+1769 0b26 a6 0d              		lda	#$0d			*space send
+1770 0b28 cc 0c 39           		jmp	Monitor1Send		*
+1771 0b2b 3d 5e              MonDump08	tst	MonWork+1		*term check
+1772 0b2d 27 03              		beq	MonDump09		*display end
+1773 0b2f cc 0a cc           		jmp	MonDump02
+1774 0b32 cc 09 f9           MonDump09	jmp	MonitorEnd
+1775                         *memory write
+1776 0b35 cd 01 fb           MonWriteExec	jsr	THSwitch
+1777 0b38 ae 5e              		ldx	#MonWork+1		*16bit address
+1778 0b3a cd 01 7e           		jsr	Hex2Bin			*Hex to binary
+1779 0b3d b6 3e              		lda	Work1			*
+1780 0b3f b7 44              		sta	Work7			*
+1781 0b41 cd 01 7e           		jsr	Hex2Bin			*8bit data Hex to binary
+1782 0b44 be 44              		ldx	Work7			*
+1783 0b46 b6 3e              		lda	Work1			*
+1784 0b48 f7                 		sta	,X			*
+1785 0b49 cc 09 f9           		jmp	MonitorEnd		*
+1786                         *thread list display
+1787 0b4c cd 01 fb           MonThreadExec	jsr	THSwitch
+1788 0b4f 3f 68              		clr	MonGWork+1		*clear thread count
+1789 0b51 a6 20              		lda	#THContext0		*thread context work pointer
+1790 0b53 b7 67              		sta	MonGWork		*
+1791 0b55 a6 0b              MonTh00		lda	#MonTh01/256		*message display out
+1792 0b57 b7 63              		sta	MonWork+6		*
+1793 0b59 a6 64              		lda	#MonTh01&$FF		*
+1794 0b5b b7 64              		sta	MonWork+7		*
+1795 0b5d ae 0d              		ldx	#MonitorData04/256	*
+1796 0b5f a6 53              		lda	#MonitorData04&$FF	*
+1797 0b61 cc 0c 79           		jmp	MonitorStrSend		*
+1798 0b64 a6 0b              MonTh01		lda	#MonTh02/256		*thread number display out
+1799 0b66 b7 63              		sta	MonWork+6		*
+1800 0b68 a6 74              		lda	#MonTh02&$FF		*
+1801 0b6a b7 64              		sta	MonWork+7		*
+1802 0b6c ae 68              		ldx	#MonGWork+1		*
+1803 0b6e cd 01 65           		jsr	Bin2Ascii		*
+1804 0b71 cc 0c 53           		jmp	Monitor2Send		*
+1805 0b74 a6 0b              MonTh02		lda	#MonTh03/256		*A= display out
+1806 0b76 b7 63              		sta	MonWork+6		*
+1807 0b78 a6 83              		lda	#MonTh03&$FF		*
+1808 0b7a b7 64              		sta	MonWork+7		*
+1809 0b7c ae 0d              		ldx	#MonitorData05/256	*
+1810 0b7e a6 5c              		lda	#MonitorData05&$FF	*
+1811 0b80 cc 0c 79           		jmp	MonitorStrSend		*
+1812 0b83 a6 0b              MonTh03		lda	#MonTh04/256		*A reg value display out
+1813 0b85 b7 63              		sta	MonWork+6		*
+1814 0b87 a6 93              		lda	#MonTh04&$FF		*
+1815 0b89 b7 64              		sta	MonWork+7		*
+1816 0b8b be 67              		ldx	MonGWork		*
+1817 0b8d cd 01 65           		jsr	Bin2Ascii		*
+1818 0b90 cc 0c 53           		jmp	Monitor2Send		*
+1819 0b93 3c 67              MonTh04		inc	MonGWork
+1820 0b95 a6 0b              		lda	#MonTh05/256		*X= display out
+1821 0b97 b7 63              		sta	MonWork+6		*
+1822 0b99 a6 a4              		lda	#MonTh05&$FF		*
+1823 0b9b b7 64              		sta	MonWork+7		*
+1824 0b9d ae 0d              		ldx	#MonitorData06/256	*
+1825 0b9f a6 60              		lda	#MonitorData06&$FF	*
+1826 0ba1 cc 0c 79           		jmp	MonitorStrSend		*
+1827 0ba4 a6 0b              MonTh05		lda	#MonTh06/256		*X reg value display out
+1828 0ba6 b7 63              		sta	MonWork+6		*
+1829 0ba8 a6 b4              		lda	#MonTh06&$FF		*
+1830 0baa b7 64              		sta	MonWork+7		*
+1831 0bac be 67              		ldx	MonGWork		*
+1832 0bae cd 01 65           		jsr	Bin2Ascii		*
+1833 0bb1 cc 0c 53           		jmp	Monitor2Send		*
+1834 0bb4 3c 67              MonTh06		inc	MonGWork
+1835 0bb6 a6 0b              		lda	#MonTh07/256		*PC= display out
+1836 0bb8 b7 63              		sta	MonWork+6		*
+1837 0bba a6 c5              		lda	#MonTh07&$FF		*
+1838 0bbc b7 64              		sta	MonWork+7		*
+1839 0bbe ae 0d              		ldx	#MonitorData07/256	*
+1840 0bc0 a6 64              		lda	#MonitorData07&$FF	*
+1841 0bc2 cc 0c 79           		jmp	MonitorStrSend		*
+1842 0bc5 a6 0b              MonTh07		lda	#MonTh08/256		*PCH reg value display out
+1843 0bc7 b7 63              		sta	MonWork+6		*
+1844 0bc9 a6 d5              		lda	#MonTh08&$FF		*
+1845 0bcb b7 64              		sta	MonWork+7		*
+1846 0bcd be 67              		ldx	MonGWork		*
+1847 0bcf cd 01 65           		jsr	Bin2Ascii		*
+1848 0bd2 cc 0c 53           		jmp	Monitor2Send		*
+1849 0bd5 3c 67              MonTh08		inc	MonGWork
+1850 0bd7 a6 0b              		lda	#MonTh09/256		*PCL reg value display out
+1851 0bd9 b7 63              		sta	MonWork+6		*
+1852 0bdb a6 e7              		lda	#MonTh09&$FF		*
+1853 0bdd b7 64              		sta	MonWork+7		*
+1854 0bdf be 67              		ldx	MonGWork		*
+1855 0be1 cd 01 65           		jsr	Bin2Ascii		*
+1856 0be4 cc 0c 53           		jmp	Monitor2Send		*
+1857 0be7 a6 0b              MonTh09		lda	#MonTh10/256		*CR display out
+1858 0be9 b7 63              		sta	MonWork+6		*
+1859 0beb a6 f4              		lda	#MonTh10&$FF		*
+1860 0bed b7 64              		sta	MonWork+7		*
+1861 0bef a6 0d              		lda	#$0d			*
+1862 0bf1 cc 0c 39           		jmp	Monitor1Send		*
+1863 0bf4 3c 67              MonTh10		inc	MonGWork		*
+1864 0bf6 3c 68              		inc	MonGWork+1		*thread count inc
+1865 0bf8 b6 68              		lda	MonGWork+1		*loop count
+1866 0bfa a1 04              		cmp	#$04			*end check
+1867 0bfc 27 03              		beq	MonTh11			*go end
+1868 0bfe cc 0b 55           		jmp	MonTh00
+1869 0c01 cc 09 f9           MonTh11		jmp	MonitorEnd
+1870                         *monitor swi
+1871 0c04 b7 69              MonitorSWI	sta	MonRegA
+1872 0c06 bf 6a              		stx	MonRegX
+1873 0c08 3c 6b              		inc	MonSWIFlag
+1874 0c0a 80                 		rti
+1875                         *monitor initarize
+1876                         MonitorIni	
+1877 0c0b 3f 65              MonBuffClear	clr	MonInpCnt
+1878 0c0d 3f 5d              		clr	MonWork
+1879 0c0f 3f 5e              		clr	MonWork+1
+1880 0c11 3f 5f              		clr	MonWork+2
+1881 0c13 3f 60              		clr	MonWork+3
+1882 0c15 3f 61              		clr	MonWork+4
+1883 0c17 3f 62              		clr	MonWork+5
+1884 0c19 3f 63              		clr	MonWork+6
+1885 0c1b 3f 64              		clr	MonWork+7
+1886 0c1d 3f 6b              		clr	MonSWIFlag
+1887 0c1f 81                 		rts
+1888                         *message string
+1889 0c20 a6 16              MonitorMes00	lda	#22
+1890 0c22 4a                 MonStartupWait	deca
+1891 0c23 27 05              		beq	MonitorStartMes
+1892 0c25 cd 01 fb           		jsr	THSwitch
+1893 0c28 20 f8              		bra	MonStartupWait
+1894 0c2a a6 09              MonitorStartMes	lda	#MonitorEnd/256
+1895 0c2c b7 63              		sta	MonWork+6
+1896 0c2e a6 f9              		lda	#MonitorEnd&$FF
+1897 0c30 b7 64              		sta	MonWork+7
+1898 0c32 ae 0c              		ldx	#MonitorData00/256
+1899 0c34 a6 ac              		lda	#MonitorData00&$FF
+1900 0c36 cc 0c 79           		jmp	MonitorStrSend
+1901                         *1byte send	
+1902                         * A<-chr code
+1903                         * [Work6:Work7] return address
+1904                         Monitor1Send
+1905 0c39 bf 61              		stx	MonWork+4
+1906 0c3b b7 62              		sta	MonWork+5
+1907 0c3d b6 62              Mon1Send00	lda	MonWork+5
+1908 0c3f cd 08 ca           		jsr	UARTTxWrite
+1909 0c42 24 05              		bcc	Mon1Send01
+1910 0c44 cd 01 fb           		jsr	THSwitch
+1911 0c47 20 f4              		bra	Mon1Send00
+1912 0c49 b6 62              Mon1Send01	lda	MonWork+5
+1913 0c4b ae cc              		ldx	#$cc
+1914 0c4d bf 62              		stx	MonWork+5
+1915 0c4f be 61              		ldx	MonWork+4
+1916 0c51 bc 62              		jmp	MonWork+5
+1917                         *2byte send
+1918                         * x<-MSB char
+1919                         * A<-LSB char
+1920                         * [Work6:Work7] return address
+1921 0c53 bf 61              Monitor2Send	stx	MonWork+4
+1922 0c55 b7 62              		sta	MonWork+5
+1923 0c57 b6 61              Mon2Send00	lda	MonWork+4
+1924 0c59 cd 08 ca           		jsr	UARTTxWrite
+1925 0c5c 24 05              		bcc	Mon2Send01
+1926 0c5e cd 01 fb           		jsr	THSwitch
+1927 0c61 20 f4              		bra	Mon2Send00
+1928 0c63 b6 62              Mon2Send01	lda	MonWork+5
+1929 0c65 cd 08 ca           Mon2Send02	jsr	UARTTxWrite
+1930 0c68 24 05              		bcc	Mon2Send03
+1931 0c6a cd 01 fb           		jsr	THSwitch
+1932 0c6d 20 f4              		bra	Mon2Send01
+1933 0c6f b6 62              Mon2Send03	lda	MonWork+5
+1934 0c71 ae cc              		ldx	#$cc
+1935 0c73 bf 62              		stx	MonWork+5
+1936 0c75 be 61              		ldx	MonWork+4
+1937 0c77 bc 62              		jmp	MonWork+5
+1938                         *fix message send
+1939                         * [X:A] string top address
+1940                         * [Work6:Work7] return address
+1941 0c79 bf 5e              MonitorStrSend	stx	MonWork+1		*ram write lda aaaa,x
+1942 0c7b b7 5f              		sta	MonWork+2		*
+1943 0c7d a6 d6              		lda	#$d6			*
+1944 0c7f b7 5d              		sta	MonWork			*
+1945 0c81 a6 81              		lda	#$81			*ram write rts
+1946 0c83 b7 60              		sta	MonWork+3		*
+1947 0c85 3f 66              		clr	MonPerReg		*offset counter clear
+1948 0c87 be 66              MonitorM00	ldx	MonPerReg		*load offset
+1949 0c89 bd 5d              		jsr	MonWork			*lda aaaa,X	exec
+1950 0c8b 27 0e              		beq	MonitorMessEnd		*string terminate detect
+1951 0c8d cd 08 ca           MonitorM01	jsr	UARTTxWrite		*send character
+1952 0c90 24 05              		bcc	MonitorM02		*send success
+1953 0c92 cd 01 fb           		jsr	THSwitch		*thread switch
+1954 0c95 20 f0              		bra	MonitorM00		*
+1955 0c97 3c 66              MonitorM02	inc	MonPerReg		*next data
+1956 0c99 20 ec              		bra	MonitorM00		*
+1957 0c9b a6 cc              MonitorMessEnd	lda	#$cc
+1958 0c9d b7 42              		sta	Work5
+1959 0c9f b6 63              		lda	MonWork+6
+1960 0ca1 b7 43              		sta	Work6
+1961 0ca3 b6 64              		lda	MonWork+7
+1962 0ca5 b7 44              		sta	Work7
+1963 0ca7 cd 0c 0b           		jsr	MonBuffClear		*
+1964 0caa bc 42              		jmp	Work5			*
+1965 0cac 0d                 MonitorData00	fcb	$0d
+1966 0cad 4d 69 6e 69 4d 6f  		fcb	'M,'i,'n,'i,'M,'o,'n,'i,'t,'o,'r,' ,'V,'e,'r,'.,'1,'.,'0
+     6e 69 74 6f 72 20
+     56 65 72 2e 31 2e
+     30
+1967 0cc0 20 28 63 29 63 6f  		fcb	' ,'(,'c,'),'c,'o,'m,'o,'n,'e,'k,'o,' ,'2,'0,'2,'2,$0d,$00
+     6d 6f 6e 65 6b 6f
+     20 32 30 32 32 0d
+     00
+1968 0cd3 0d                 MonitorData01	fcb	$0d
+1969 0cd4 41 44 44 52 7c 2b  		fcb	'A,'D,'D,'R,'|,'+,'0,' ,'+,'1,' ,'+,'2
+     30 20 2b 31 20 2b
+     32
+1970 0ce1 20 2b 33 20 2b 34  		fcb	' ,'+,'3,' ,'+,'4,' ,'+,'5,' ,'+,'6,' ,'+
+     20 2b 35 20 2b 36
+     20 2b
+1971 0cef 37 20 2b 38 20 2b  		fcb	'7,' ,'+,'8,' ,'+,'9,' ,'+,'A,' ,'+,'B
+     39 20 2b 41 20 2b
+     42
+1972 0cfc 20 2b 43 20 2b 44  		fcb	' ,'+,'C,' ,'+,'D,' ,'+,'E,' ,'+,'F,'|,$0d,$00
+     20 2b 45 20 2b 46
+     7c 0d 00
+1973 0d0b 2d 2d 2d 2d 2b 2d  MonitorData02	fcb	'-,'-,'-,'-,'+,'-,'-,'-,'-,'-,'-,'-,'-,'-,'-,'-
+     2d 2d 2d 2d 2d 2d
+     2d 2d 2d 2d
+1974 0d1b 2d 2d 2d 2d 2d 2d  		fcb	'-,'-,'-,'-,'-,'-,'-,'-,'-,'-,'-,'-,'-,'-,'-,'-
+     2d 2d 2d 2d 2d 2d
+     2d 2d 2d 2d
+1975 0d2b 2d 2d 2d 2d 2d 2d  		fcb	'-,'-,'-,'-,'-,'-,'-,'-,'-,'-,'-,'-,'-,'-,'-,'-
+     2d 2d 2d 2d 2d 2d
+     2d 2d 2d 2d
+1976 0d3b 2d 2d 2d 2d 2b 0d  		fcb	'-,'-,'-,'-,'+,$0d,$00
+     00
+1977 0d42 49 6e 76 61 6c 69  MonitorData03	fcb	'I,'n,'v,'a,'l,'i,'d,' ,'c,'o,'m,'m,'a,'n,'d,$0d,$00
+     64 20 63 6f 6d 6d
+     61 6e 64 0d 00
+1978 0d53 54 68 72 65 61 64  MonitorData04	fcb	'T,'h,'r,'e,'a,'d,' ,':,$00
+     20 3a 00
+1979 0d5c 20 41 3d 00        MonitorData05	fcb	' ,'A,'=,$00
+1980 0d60 20 58 3d 00        MonitorData06	fcb	' ,'X,'=,$00
+1981 0d64 20 50 43 3d 00     MonitorData07	fcb	' ,'P,'C,'=,$00
+1982 0d69 20 43 43 3d 00     MonitorData08	fcb	' ,'C,'C,'=,$00
+1983 0d6e 53 57 49 20 52 45  MonitorData09	fcb	'S,'W,'I,' ,'R,'E,'G,' ,'=,'>,$00
+     47 20 3d 3e 00
+1984 0d79 43 6f 6d 6d 61 6e  MonitorDataHlp	fcb	'C,'o,'m,'m,'a,'n,'d,' ,'l,'i,'s,'t,$0d
+     64 20 6c 69 73 74
+     0d
+1985 0d86 64 20 4d 65 6d 6f  		fcb	'd,' ,'M,'e,'m,'o,'r,'y,' ,'d,'u,'m,'p,' ,'(
+     72 79 20 64 75 6d
+     70 20 28
+1986 0d95 66 69 78 20 24 30  		fcb	'f,'i,'x,' ,'$,'0,'0,'0,'0,'-,'$,'0,'0,'F,'F,'),$0d
+     30 30 30 2d 24 30
+     30 46 46 29 0d
+1987 0da6 74 20 54 68 72 65  		fcb	't,' ,'T,'h,'r,'e,'a,'d,' ,'l,'i,'s,'t,$0d
+     61 64 20 6c 69 73
+     74 0d
+1988 0db4 77 5b 61 64 64 72  		fcb	'w,'[,'a,'d,'d,'r,' ,'0,'0,'-,'F,'F,'],' ,'[
+     20 30 30 2d 46 46
+     5d 20 5b
+1989 0dc3 64 61 74 61 5d 4d  		fcb	'd,'a,'t,'a,'], 'M,'e,'m,'o,'r,'y,' ,'w,'r,'i,'t,'e,$0d
+     65 6d 6f 72 79 20
+     77 72 69 74 65 0d
+1990 0dd5 78 5b 61 64 64 72  		fcb	'x,'[,'a,'d,'d,'r,'0,'0,'0,'0,'-,'F,'F,'F,'F
+     30 30 30 30 2d 46
+     46 46 46
+1991 0de4 5d 20 65 78 65 63  		fcb	'],' ,'e,'x,'e,'c,'u,'t,'e,$0d
+     75 74 65 0d
+1992 0dee 63 5b 61 64 64 72  		fcb	'c,'[,'a,'d,'d,'r,'0,'0,'0,'0,'-,'F,'F,'F,'F
+     30 30 30 30 2d 46
+     46 46 46
+1993 0dfd 5d 20 73 75 62 72  		fcb	'],' ,'s,'u,'b,'r,'o,'u,'t,'i,'n,' ,'c,'a,'l,'l,$0d
+     6f 75 74 69 6e 20
+     63 61 6c 6c 0d
+1994 0e0e 52 65 67 69 73 74  		fcb	'R,'e,'g,'i,'s,'t,'e,'r,' ,'d,'i,'s,'p,'l,'a
+     65 72 20 64 69 73
+     70 6c 61
+1995 0e1d 79 20 62 79 20 53  		fcb	'y,' ,'b,'y,' ,'S,'W,'I,$0d		
+     57 49 0d
+1996 0e26 00                 		fcb	$00
+1997                         
+1998                         
+1999                         *--------------------------------------------------------------------
+2000                         *--------------------------------------------------------------------
+2001                         *vector table
+2002 0ff8                    		org	VECTOR_TABLE
+2003 0ff8 01 f2              TimerIRQVect	fdb	TIMER_IRQ
+2004 0ffa 01 f7              INTIRQVect	fdb	INT_IRQ
+2005 0ffc 01 f8              SWIVect		fdb	SWI_IRQ
+2006 0ffe 02 49              ResetVect	fdb	START
+2007                         
+ADJMode    0005
+BT100      03f4
+BT200      0401
+BT300      040f
+BT301      041c
+BT400      0428
+BT401      0434
+BT500      0446
+BT501      043d
+BT600      045d
+BT601      045f
+BT602      0456
+BTID01     04c6
+BTID02     04a1
+BTID03     04b7
+BTID04     04c2
+BTID05     04d4
+BTID06     04dd
+BTID07     04b4
+BTIncDec   0468
+BTLastData 004e
+BTMask     00fc
+BTPort     0003
+BTPush1    03eb
+BTPush2    03f8
+BTPush3    0406
+BTPush4    041f
+BTPush5    0437
+BTPush6    044d
+BTSetDigit 0050
+BTSw1      0002
+BTSw2      0003
+BTSw3      0004
+BTSw4      0005
+BTSw5      0006
+BTSw6      0007
+Bin2Ascii  0165
+Bin2Ascii00 0172
+Bin2Ascii01 017d
+Bin2Hex    0155
+Bin2HexDisp 015e
+ButtunProc 03be
+CL00       0347
+CL01       0354
+CL03       036e
+CL04       037f
+CL05       038c
+CL06       039b
+CL07       03a9
+CL08       032f
+CL09       0331
+CLB2D00    06a7
+CLB2D01    06b0
+CLB2D200   06c6
+CLB2D201   06d7
+CLB2D202   06e7
+CLB2D203   06f8
+CLBin2Dec  06a5
+CLBin2Dec2 06b3
+CLBitLeapYear 0003
+CLC02      0361
+CLCheckLY00 03b5
+CLCheckLeapYear 03ac
+CLCountUp  033c
+CLD48_01   05f9
+CLD48_02   0619
+CLD48_03   0600
+CLD48_04   0630
+CLD48_05   0616
+CLD48_06   060f
+CLD48_07   0612
+CLDay      0048
+CLDisp12_jmp 050e
+CLDisp24_jmp 050b
+CLDisp48   05e7
+CLDisp48_jmp 0514
+CLDispDT_jmp 0517
+CLDispD_jmp 0520
+CLDispDandT 0660
+CLDispDate 05ab
+CLDispDate_jmp 0511
+CLDispDay  0758
+CLDispH_jmp 0523
+CLDispHour 0771
+CLDispMI_jmp 0526
+CLDispMS_jmp 052c
+CLDispMSec 07bc
+CLDispM_jmp 051d
+CLDispMin  078a
+CLDispMin24 0548
+CLDispMode 004d
+CLDispMonth 073f
+CLDispS_jmp 0529
+CLDispSec  07a3
+CLDispSetCommon 07d5
+CLDispT00  0590
+CLDispT01  05a0
+CLDispT02  05a9
+CLDispTime12 057a
+CLDispTime24 052f
+CLDispY_jmp 051a
+CLDispYear 0713
+CLDisplay  04e0
+CLDotBlank 06fd
+CLDtBl01   070e
+CLEDWork   006c
+CLHou      0049
+CLMin      004a
+CLMon      0047
+CLMonthTable 00e0
+CLSec      004b
+CLSetMax   00ec
+CLSetMin   00f2
+CLYear     0045
+CLmSec     004c
+CTSIN      0001
+CheckLED   01e6
+H2B00      0182
+H2B01      018e
+H2B02      0194
+H2B03      01a0
+H2B04      01a7
+H2B05      01b1
+H2B06      01cf
+H2BEND     01d8
+Hex2Bin    017e
+INTIRQVect 0ffa
+INT_IRQ    01f7
+LIBSub16   01d9
+Mon1Send00 0c3d
+Mon1Send01 0c49
+Mon2Send00 0c57
+Mon2Send01 0c63
+Mon2Send02 0c65
+Mon2Send03 0c6f
+MonBuffClear 0c0b
+MonCallExec 0a8b
+MonDump    0a57
+MonDump00  0ab9
+MonDump01  0ac8
+MonDump02  0acc
+MonDump03  0adc
+MonDump04  0aec
+MonDump05  0af9
+MonDump06  0b09
+MonDump07  0b1e
+MonDump08  0b2b
+MonDump09  0b32
+MonDumpExec 0aaa
+MonEnd00   0a17
+MonGWork   0067
+MonHelp00  0a75
+MonHelpExec 0a66
+MonInpCnt  0065
+MonJmp     0a5d
+MonJmpExec 0a78
+MonPerReg  0066
+MonRegA    0069
+MonRegX    006a
+MonSWIFlag 006b
+MonStartupWait 0c22
+MonSubCall 0a60
+MonTh00    0b55
+MonTh01    0b64
+MonTh02    0b74
+MonTh03    0b83
+MonTh04    0b93
+MonTh05    0ba4
+MonTh06    0bb4
+MonTh07    0bc5
+MonTh08    0bd5
+MonTh09    0be7
+MonTh10    0bf4
+MonTh11    0c01
+MonThread  0a5a
+MonThreadExec 0b4c
+MonWork    005d
+MonWrite   0a63
+MonWriteExec 0b35
+Monitor00  0a26
+Monitor1Send 0c39
+Monitor2Send 0c53
+MonitorBS  09c9
+MonitorBS00 09d7
+MonitorBS01 09e1
+MonitorBS02 09e3
+MonitorBS03 09ed
+MonitorBS04 09ef
+MonitorCmdLine 099a
+MonitorData00 0cac
+MonitorData01 0cd3
+MonitorData02 0d0b
+MonitorData03 0d42
+MonitorData04 0d53
+MonitorData05 0d5c
+MonitorData06 0d60
+MonitorData07 0d64
+MonitorData08 0d69
+MonitorData09 0d6e
+MonitorDataHlp 0d79
+MonitorEnd 09f9
+MonitorEnter 0a1a
+MonitorIn00 09bf
+MonitorInBuff 09b5
+MonitorIni 0c0b
+MonitorM00 0c87
+MonitorM01 0c8d
+MonitorM02 0c97
+MonitorMes00 0c20
+MonitorMessEnd 0c9b
+MonitorSWI 0c04
+MonitorStartMes 0c2a
+MonitorStrSend 0c79
+MonitorTask 0938
+Monswi00   0941
+Monswi01   0950
+Monswi02   095f
+Monswi03   096f
+Monswi04   097e
+Monswi05   098e
+PortA      0000
+PortA_DR   0004
+PortB      0001
+PortB_DR   0005
+PortC      0002
+PortC_DR   0006
+PortC_HBLED 0080
+PortC_VFDHeater 0040
+PortD      0003
+PortD_AN   0007
+RAM_BASE   0020
+RAM_TOP    007f
+ROM_BASE   0080
+ROM_TOP    0f7f
+RTSOUT     0005
+RXIN       0000
+ResetVect  0ffe
+STACK_ACCM 007c
+STACK_BASE 007f
+STACK_CCR  007b
+STACK_INDEX 007d
+STACK_PCH  007e
+STACK_PCL  007f
+START      0249
+SWIVect    0ffc
+SWIWaitTimerUp 0240
+SWI_IRQ    01f8
+TBLRSeg00  013b
+TBLRSeg01  0144
+TBLRSeg02  014d
+TBLRead    00f8
+TBLReadScan 0118
+TBLReadSeg 0126
+TCRBitIRQ  0007
+TCRBitMask 0006
+THBitClockTrig 0006
+THBitSecFlag 0004
+THBitThNum 0003
+THBitTimerFlag 0007
+THBitWaitDummy 0000
+THContext0 0020
+THContext1 0024
+THContext2 0028
+THContext3 002c
+THNumber   0030
+THPost01   0321
+THPost02   031f
+THPre00    0304
+THPre01    030b
+THPre02    02ed
+THPre03    02ef
+THStart    0226
+THState    0031
+THSwitch   01fb
+THTrig00   0224
+TIMER_IRQ  01f2
+TXOUT      0004
+Thread0Exec 0322
+Thread1Exec 03b8
+Thread2Exec 04e0
+Thread3Exec 07ec
+ThreadPost 030e
+ThreadPre  02d3
+TimerCTRLReg 0009
+TimerDataReg 0008
+TimerIRQVect 0ff8
+UARTInit   089a
+UARTRx00   083c
+UARTRx01   0847
+UARTRx05   086d
+UARTRxBuff 0055
+UARTRxECK00 08c8
+UARTRxEmptyCheck 08bd
+UARTRxEnd  0878
+UARTRxR00  0936
+UARTRxRPtr 005c
+UARTRxRead 091f
+UARTRxS00  0883
+UARTRxSub  087c
+UARTRxSub01 0885
+UARTRxTask 0832
+UARTRxW00  091c
+UARTRxWPtr 005b
+UARTRxWrite 08ff
+UARTTask   07ec
+UARTTx00   07f5
+UARTTx01   0808
+UARTTx02   080f
+UARTTx03   0813
+UARTTxBuff 0051
+UARTTxECK00 08bb
+UARTTxEmptyCheck 08b3
+UARTTxEnd  082e
+UARTTxR00  08fe
+UARTTxRPtr 005a
+UARTTxRead 08ea
+UARTTxTask 07ef
+UARTTxW00  08e7
+UARTTxWPtr 0059
+UARTTxWrite 08ca
+UARTWait14 0899
+UARTWait16 0898
+UARTWait18 0897
+UARTWait20 0896
+UARTWait22 0895
+UARTWait23 0890
+UARTWait24 0894
+UARTWait25 088f
+UARTWait27 088e
+UARTWait34 088c
+UARTWait48 0888
+UARTWait50 0887
+UARTWait52 0886
+VECTOR_TABLE 0ff8
+VFDBitCom  0005
+VFDBitDp   0007
+VFDBitDush 0006
+VFDCHR_0   0000
+VFDCHR_1   0001
+VFDCHR_2   0002
+VFDCHR_3   0003
+VFDCHR_4   0004
+VFDCHR_5   0005
+VFDCHR_6   0006
+VFDCHR_7   0007
+VFDCHR_8   0008
+VFDCHR_9   0009
+VFDCHR_A   000a
+VFDCHR_E   000e
+VFDCHR_F   000f
+VFDCHR_G   0010
+VFDCHR_H   0011
+VFDCHR_J   0013
+VFDCHR_L   0015
+VFDCHR_MI  001e
+VFDCHR_P   0018
+VFDCHR_SPACE 001f
+VFDCHR_b   000b
+VFDCHR_c   000c
+VFDCHR_d   000d
+VFDCHR_i   0012
+VFDCHR_k   0014
+VFDCHR_n   0016
+VFDCHR_o   0017
+VFDCHR_q   0019
+VFDCHR_r   001a
+VFDCHR_t   001b
+VFDCHR_u   001c
+VFDCHR_y   001d
+VFDDigitScan 0032
+VFDDigitValue 0034
+VFDMsk0Dush 0040
+VFDMsk1Com 0010
+VFDMsk1Dp  0004
+VFDScanBitTbl 0080
+VFDScanStartPos 0033
+VFDScnMsk0 0089
+VFDScnMsk1 00e9
+VFDScnMsk2 0001
+VFDSegCom  0020
+VFDSegDp   0080
+VFDSegDush 0040
+VFDSegMsk0 0036
+VFDSegMsk1 0002
+VFDSegMsk2 000e
+Work0      003d
+Work1      003e
+Work2      003f
+Work3      0040
+Work4      0041
+Work5      0042
+Work6      0043
+Work7      0044
+notTHBitThNum 00fc
+ADJMode    0005 *0096 0659 0761 0767 0773 0785 0796 0799 0801 0806 
+BT100      03f4 *0763 0761 
+BT200      0401 *0769 0767 
+BT300      040f *0775 0773 
+BT301      041c *0782 0778 
+BT400      0428 *0787 0785 
+BT401      0434 *0793 0789 
+BT500      0446 *0801 0796 
+BT501      043d *0797 
+BT600      045d *0812 
+BT601      045f *0813 0811 
+BT602      0456 *0808 0806 
+BTID01     04c6 *0872 0822 
+BTID02     04a1 *0850 0837 0846 0848 
+BTID03     04b7 *0863 0854 
+BTID04     04c2 *0869 0865 
+BTID05     04d4 *0879 0873 
+BTID06     04dd *0884 0876 0878 0882 
+BTID07     04b4 *0862 0859 
+BTIncDec   0468 *0819 0764 0770 
+BTLastData 004e *0086 0547 0548 0743 0744 0748 0750 
+BTMask     00fc *0089 0741 
+BTPort     0003 *0088 0740 
+BTPush1    03eb *0760 0752 
+BTPush2    03f8 *0766 0753 
+BTPush3    0406 *0772 0754 
+BTPush4    041f *0784 0755 
+BTPush5    0437 *0795 0756 
+BTPush6    044d *0805 0757 
+BTSetDigit 0050 *0087 
+BTSw1      0002 *0090 0752 
+BTSw2      0003 *0091 0753 
+BTSw3      0004 *0092 0754 
+BTSw4      0005 *0093 0755 
+BTSw5      0006 *0094 0756 
+BTSw6      0007 *0095 0757 
+Bin2Ascii  0165 *0307 1561 1575 1733 1740 1753 1803 1817 1832 1847 
+                      1855 
+Bin2Ascii00 0172 *0314 0312 
+Bin2Ascii01 017d *0320 0318 
+Bin2Hex    0155 *0293 0302 0307 
+Bin2HexDisp 015e *0302 
+ButtunProc 03be *0739 0762 0768 0774 0782 0786 0793 0800 0803 0807 
+                      0816 0862 0868 0870 0884 1641 
+CL00       0347 *0667 0664 
+CL01       0354 *0674 0671 
+CL03       036e *0688 0685 
+CL04       037f *0697 0694 0695 
+CL05       038c *0704 0701 
+CL06       039b *0712 0709 
+CL07       03a9 *0719 0660 0666 0673 0680 0687 0703 0711 0717 
+CL08       032f *0656 0653 
+CL09       0331 *0657 0655 
+CLB2D00    06a7 *1119 1123 
+CLB2D01    06b0 *1124 1121 
+CLB2D200   06c6 *1139 1146 
+CLB2D201   06d7 *1147 1144 
+CLB2D202   06e7 *1155 1162 
+CLB2D203   06f8 *1163 1160 
+CLBin2Dec  06a5 *1118 0939 0946 0954 0962 0979 1008 1014 1049 1060 
+                      1067 1075 1086 1092 1100 1107 1164 1284 
+CLBin2Dec2 06b3 *1129 0996 1192 
+CLBitLeapYear 0003 *0084 0695 0726 0728 0848 1041 
+CLC02      0361 *0681 0678 
+CLCheckLY00 03b5 *0728 0725 
+CLCheckLeapYear 03ac *0722 0689 0847 
+CLCountUp  033c *0661 0659 
+CLD48_01   05f9 *1030 
+CLD48_02   0619 *1049 1041 1044 1046 
+CLD48_03   0600 *1034 1032 
+CLD48_04   0630 *1060 1058 
+CLD48_05   0616 *1047 1029 
+CLD48_06   060f *1043 1040 
+CLD48_07   0612 *1045 1025 
+CLDay      0048 *0078 0539 0698 0702 0705 1013 1026 1045 1047 1091 
+                      1226 
+CLDisp12_jmp 050e *0921 0897 
+CLDisp24_jmp 050b *0920 0895 
+CLDisp48   05e7 *1021 0923 
+CLDisp48_jmp 0514 *0923 0901 
+CLDispDT_jmp 0517 *0924 0903 
+CLDispD_jmp 0520 *0927 0909 
+CLDispDandT 0660 *1083 0924 
+CLDispDate 05ab *0993 0922 
+CLDispDate_jmp 0511 *0922 0899 
+CLDispDay  0758 *1216 0927 
+CLDispH_jmp 0523 *0928 0911 
+CLDispHour 0771 *1229 0928 
+CLDispMI_jmp 0526 *0929 0913 
+CLDispMS_jmp 052c *0931 0917 
+CLDispMSec 07bc *1268 0931 
+CLDispM_jmp 051d *0926 0907 
+CLDispMin  078a *1242 0929 
+CLDispMin24 0548 *0945 0985 
+CLDispMode 004d *0083 0537 0775 0779 0787 0790 0798 0802 0808 0813 
+                      0820 0894 
+CLDispMonth 073f *1203 0926 
+CLDispS_jmp 0529 *0930 0915 
+CLDispSec  07a3 *1255 0930 
+CLDispSetCommon 07d5 *1282 1214 1227 1240 1253 1266 1279 
+CLDispT00  0590 *0979 0977 0989 0991 
+CLDispT01  05a0 *0986 0973 
+CLDispT02  05a9 *0991 
+CLDispTime12 057a *0969 0921 
+CLDispTime24 052f *0934 0920 
+CLDispY_jmp 051a *0925 0905 
+CLDispYear 0713 *1181 0925 
+CLDisplay  04e0 *0893 
+CLDotBlank 06fd *1168 0935 0970 0994 1022 1084 
+CLDtBl01   070e *1176 1171 
+CLEDWork   006c *0113 0393 0398 
+CLHou      0049 *0079 0536 0682 0686 0688 0938 0971 1023 1056 1099 
+                      1239 
+CLMin      004a *0080 0535 0675 0679 0681 0945 1066 1106 1252 
+CLMon      0047 *0077 0540 0690 0706 0710 0713 0838 0844 0850 1007 
+                      1030 1085 1213 
+CLMonthTable 00e0 *0159 0692 0840 1035 
+CLSec      004b *0081 0534 0668 0672 0674 0953 1074 1265 
+CLSetMax   00ec *0160 0825 
+CLSetMin   00f2 *0161 0830 
+CLYear     0045 *0076 0542 0544 0714 0716 0718 0723 0874 0875 0877 
+                      0879 0880 0883 0995 1191 
+CLmSec     004c *0082 0533 0651 0661 0665 0667 0961 1278 
+CTSIN      0001 *0023 1309 
+CheckLED   01e6 *0393 
+H2B00      0182 *0330 0335 
+H2B01      018e *0337 0332 
+H2B02      0194 *0340 0349 
+H2B03      01a0 *0347 0344 
+H2B04      01a7 *0351 0342 
+H2B05      01b1 *0356 0376 
+H2B06      01cf *0372 0370 
+H2BEND     01d8 *0377 0336 0350 0358 
+Hex2Bin    017e *0328 1687 1697 1778 1781 
+INTIRQVect 0ffa *2004 
+INT_IRQ    01f7 *0414 2004 
+LIBSub16   01d9 *0382 1143 1159 
+Mon1Send00 0c3d *1907 1911 
+Mon1Send01 0c49 *1912 1909 
+Mon2Send00 0c57 *1923 1927 
+Mon2Send01 0c63 *1928 1925 1932 
+Mon2Send02 0c65 *1929 
+Mon2Send03 0c6f *1933 1930 
+MonBuffClear 0c0b *1877 1963 
+MonCallExec 0a8b *1696 1674 
+MonDump    0a57 *1671 1651 
+MonDump00  0ab9 *1719 1712 1714 
+MonDump01  0ac8 *1726 1719 1721 
+MonDump02  0acc *1728 1773 
+MonDump03  0adc *1735 1728 1730 
+MonDump04  0aec *1742 1735 1737 
+MonDump05  0af9 *1748 1742 1744 1759 1761 
+MonDump06  0b09 *1755 1748 1750 
+MonDump07  0b1e *1765 1758 
+MonDump08  0b2b *1771 1765 1767 
+MonDump09  0b32 *1774 1772 
+MonDumpExec 0aaa *1712 1671 
+MonEnd00   0a17 *1641 1584 1595 1603 1608 1624 1638 
+MonGWork   0067 *0108 1788 1790 1802 1816 1819 1831 1834 1846 1849 
+                      1854 1863 1864 1865 
+MonHelp00  0a75 *1684 1677 1679 
+MonHelpExec 0a66 *1677 1661 1663 
+MonInpCnt  0065 *0106 1592 1596 1601 1606 1609 1610 1627 1647 1877 
+MonJmp     0a5d *1673 1655 
+MonJmpExec 0a78 *1686 1673 
+MonPerReg  0066 *0107 1947 1948 1955 
+MonRegA    0069 *0109 1560 1871 
+MonRegX    006a *0110 1574 1872 
+MonSWIFlag 006b *0111 1538 1541 1873 1886 
+MonStartupWait 0c22 *1890 1893 
+MonSubCall 0a60 *1674 1657 
+MonTh00    0b55 *1791 1868 
+MonTh01    0b64 *1798 1791 1793 
+MonTh02    0b74 *1805 1798 1800 
+MonTh03    0b83 *1812 1805 1807 
+MonTh04    0b93 *1819 1812 1814 
+MonTh05    0ba4 *1827 1820 1822 
+MonTh06    0bb4 *1834 1827 1829 
+MonTh07    0bc5 *1842 1835 1837 
+MonTh08    0bd5 *1849 1842 1844 
+MonTh09    0be7 *1857 1850 1852 
+MonTh10    0bf4 *1863 1857 1859 
+MonTh11    0c01 *1869 1867 
+MonThread  0a5a *1672 1653 
+MonThreadExec 0b4c *1787 1672 
+MonWork    005d *0105 1543 1545 1550 1552 1557 1559 1564 1566 1571 
+                      1573 1597 1611 1628 1629 1630 1631 1632 1633 1634 1635 
+                      1649 1665 1667 1678 1680 1686 1689 1691 1693 1694 1696 
+                      1699 1701 1703 1705 1707 1709 1710 1713 1715 1720 1722 
+                      1726 1727 1729 1731 1732 1736 1738 1739 1743 1745 1749 
+                      1751 1752 1755 1756 1760 1762 1766 1768 1771 1777 1792 
+                      1794 1799 1801 1806 1808 1813 1815 1821 1823 1828 1830 
+                      1836 1838 1843 1845 1851 1853 1858 1860 1878 1879 1880 
+                      1881 1882 1883 1884 1885 1895 1897 1905 1906 1907 1912 
+                      1914 1915 1916 1921 1922 1923 1928 1933 1935 1936 1937 
+                      1941 1942 1944 1946 1949 1959 1961 
+MonWrite   0a63 *1675 1659 
+MonWriteExec 0b35 *1776 1675 
+Monitor00  0a26 *1647 1644 
+Monitor1Send 0c39 *1904 1747 1764 1770 1862 
+Monitor2Send 0c53 *1921 1562 1576 1734 1741 1754 1804 1818 1833 1848 
+                      1856 
+MonitorBS  09c9 *1606 1591 
+MonitorBS00 09d7 *1613 1616 
+MonitorBS01 09e1 *1617 1614 
+MonitorBS02 09e3 *1618 1621 
+MonitorBS03 09ed *1622 1619 
+MonitorBS04 09ef *1623 1626 
+MonitorCmdLine 099a *1583 1539 
+MonitorData00 0cac *1965 1898 1899 
+MonitorData01 0cd3 *1968 1716 1717 
+MonitorData02 0d0b *1973 1723 1724 
+MonitorData03 0d42 *1977 1668 1669 
+MonitorData04 0d53 *1978 1795 1796 
+MonitorData05 0d5c *1979 1553 1554 1809 1810 
+MonitorData06 0d60 *1980 1567 1568 1824 1825 
+MonitorData07 0d64 *1981 1839 1840 
+MonitorData08 0d69 *1982 
+MonitorData09 0d6e *1983 1546 1547 
+MonitorDataHlp 0d79 *1984 1681 1682 
+MonitorEnd 09f9 *1627 1579 1640 1648 1664 1666 1684 1706 1708 1774 
+                      1785 1869 1894 1896 
+MonitorEnter 0a1a *1642 1587 1589 1646 
+MonitorIn00 09bf *1602 1605 
+MonitorInBuff 09b5 *1596 1594 
+MonitorIni 0c0b *1876 0581 
+MonitorM00 0c87 *1948 1954 1956 
+MonitorM01 0c8d *1951 
+MonitorM02 0c97 *1955 1952 
+MonitorMes00 0c20 *1889 0734 
+MonitorMessEnd 0c9b *1957 1950 
+MonitorSWI 0c04 *1871 0421 
+MonitorStartMes 0c2a *1894 1891 
+MonitorStrSend 0c79 *1941 1548 1555 1569 1670 1683 1718 1725 1797 1811 
+                      1826 1841 1900 
+MonitorTask 0938 *1536 0758 
+Monswi00   0941 *1542 
+Monswi01   0950 *1549 1542 1544 
+Monswi02   095f *1556 1549 1551 
+Monswi03   096f *1563 1556 1558 
+Monswi04   097e *1570 1563 1565 
+Monswi05   098e *1577 1570 1572 1581 
+PortA      0000 *0008 0232 0233 0509 0593 
+PortA_DR   0004 *0012 0506 
+PortB      0001 *0009 0237 0238 0510 0594 
+PortB_DR   0005 *0013 0507 
+PortC      0002 *0010 0242 0243 0394 0397 0511 0596 0597 0618 0620 
+                      1313 1322 1324 1332 1348 1352 1354 1407 1408 
+PortC_DR   0006 *0014 0508 
+PortC_HBLED 0080 *0042 0395 
+PortC_VFDHeater 0040 *0041 0619 
+PortD      0003 *0011 0088 1309 1349 1382 
+PortD_AN   0007 *0015 
+RAM_BASE   0020 *0025 0048 
+RAM_TOP    007f *0026 0033 
+ROM_BASE   0080 *0028 0119 
+ROM_TOP    0f7f *0029 
+RTSOUT     0005 *0022 1348 1352 1354 1408 
+RXIN       0000 *0021 1349 1382 
+ResetVect  0ffe *2006 
+STACK_ACCM 007c *0037 0432 0440 
+STACK_BASE 007f *0033 0034 0035 0036 0037 0038 
+STACK_CCR  007b *0038 
+STACK_INDEX 007d *0036 0433 0443 0477 0480 
+STACK_PCH  007e *0035 0446 0474 
+STACK_PCL  007f *0034 0449 0471 
+START      0249 *0500 2006 
+SWIVect    0ffc *2005 
+SWIWaitTimerUp 0240 *0483 0483 
+SWI_IRQ    01f8 *0421 2005 
+TBLRSeg00  013b *0274 0269 
+TBLRSeg01  0144 *0279 0274 
+TBLRSeg02  014d *0283 0279 
+TBLRead    00f8 *0225 0256 0286 
+TBLReadScan 0118 *0250 0612 
+TBLReadSeg 0126 *0262 0609 
+TCRBitIRQ  0007 *0018 0406 
+TCRBitMask 0006 *0019 
+THBitClockTrig 0006 *0059 0458 0657 0658 
+THBitSecFlag 0004 *0060 0654 0656 1171 
+THBitThNum 0003 *0056 0435 0465 
+THBitTimerFlag 0007 *0058 0407 0483 0484 
+THBitWaitDummy 0000 *0061 1391 1392 1393 1397 
+THContext0 0020 *0050 0438 0468 0552 0553 0561 0563 1789 
+THContext1 0024 *0051 0554 0555 0565 0567 
+THContext2 0028 *0052 0556 0557 0569 0571 
+THContext3 002c *0053 0558 0559 0573 0575 
+THNumber   0030 *0054 0434 0455 0461 0464 0550 0629 
+THPost01   0321 *0639 0632 0634 
+THPost02   031f *0638 0635 
+THPre00    0304 *0618 0615 
+THPre01    030b *0622 0617 
+THPre02    02ed *0607 0600 0602 
+THPre03    02ef *0608 0606 
+THStart    0226 *0462 0584 
+THState    0031 *0055 0407 0458 0483 0484 0551 0654 0656 0657 0658 
+                      0659 0695 0726 0728 0761 0767 0773 0785 0796 0799 0801 
+                      0806 0848 1041 1171 1391 1392 1393 1397 
+THSwitch   01fb *0429 0646 0733 0739 0760 0766 0772 0784 0795 0805 
+                      0893 0934 0969 0993 1021 1083 1304 1336 1341 1376 1536 
+                      1580 1604 1615 1620 1625 1639 1645 1776 1787 1892 1910 
+                      1926 1931 1953 
+THTrig00   0224 *0459 0457 
+TIMER_IRQ  01f2 *0406 2003 
+TXOUT      0004 *0020 1313 1322 1324 1332 1407 
+Thread0Exec 0322 *0645 0560 0562 0657 0719 
+Thread1Exec 03b8 *0732 0564 0566 
+Thread2Exec 04e0 *0888 0568 0570 0919 0967 1019 1081 1113 1201 1293 
+Thread3Exec 07ec *1297 0572 0574 
+ThreadPost 030e *0627 0453 
+ThreadPre  02d3 *0589 0486 
+TimerCTRLReg 0009 *0017 0406 0514 
+TimerDataReg 0008 *0016 0516 
+TimerIRQVect 0ff8 *2003 
+UARTInit   089a *1407 0578 
+UARTRx00   083c *1349 1351 
+UARTRx01   0847 *1354 1349 
+UARTRx05   086d *1373 1377 
+UARTRxBuff 0055 *0099 1417 1418 1497 1519 
+UARTRxECK00 08c8 *1441 1438 
+UARTRxEmptyCheck 08bd *1433 1344 
+UARTRxEnd  0878 *1378 1345 1353 1375 
+UARTRxR00  0936 *1530 1517 
+UARTRxRPtr 005c *0103 1412 1437 1494 1515 1518 1523 1526 
+UARTRxRead 091f *1514 1583 
+UARTRxS00  0883 *1385 1382 
+UARTRxSub  087c *1381 1356 1358 1360 1362 1364 1366 1368 1370 
+UARTRxSub01 0885 *1386 
+UARTRxTask 0832 *1343 1307 
+UARTRxW00  091c *1508 1495 
+UARTRxWPtr 005b *0102 1411 1434 1491 1496 1499 1502 1516 
+UARTRxWrite 08ff *1489 1374 
+UARTTask   07ec *1303 1379 
+UARTTx00   07f5 *1309 1339 
+UARTTx01   0808 *1320 1329 
+UARTTx02   080f *1324 1321 
+UARTTx03   0813 *1327 1323 
+UARTTxBuff 0051 *0098 1413 1414 1415 1416 1454 1475 
+UARTTxECK00 08bb *1429 1426 
+UARTTxEmptyCheck 08b3 *1423 1306 1338 1472 
+UARTTxEnd  082e *1340 1309 
+UARTTxR00  08fe *1485 1473 
+UARTTxRPtr 005a *0101 1410 1424 1451 1474 1479 1482 
+UARTTxRead 08ea *1471 1310 
+UARTTxTask 07ef *1306 
+UARTTxW00  08e7 *1465 1452 
+UARTTxWPtr 0059 *0100 1409 1425 1448 1453 1456 1459 
+UARTTxWrite 08ca *1446 1578 1602 1613 1618 1623 1637 1643 1908 1924 
+                      1929 1951 
+UARTWait14 0899 *1404 
+UARTWait16 0898 *1403 
+UARTWait18 0897 *1402 
+UARTWait20 0896 *1401 1363 1365 
+UARTWait22 0895 *1400 1367 1369 1371 
+UARTWait23 0890 *1396 
+UARTWait24 0894 *1399 1357 1359 1361 
+UARTWait25 088f *1395 1334 
+UARTWait27 088e *1394 1319 1327 1333 1355 
+UARTWait34 088c *1393 
+UARTWait48 0888 *1391 
+UARTWait50 0887 *1390 
+UARTWait52 0886 *1389 1372 
+VECTOR_TABLE 0ff8 *0031 2002 
+VFDBitCom  0005 *0175 0269 
+VFDBitDp   0007 *0177 0279 
+VFDBitDush 0006 *0176 0274 
+VFDCHR_0   0000 *0179 
+VFDCHR_1   0001 *0180 1274 
+VFDCHR_2   0002 *0181 
+VFDCHR_3   0003 *0182 
+VFDCHR_4   0004 *0183 
+VFDCHR_5   0005 *0184 1255 
+VFDCHR_6   0006 *0185 
+VFDCHR_7   0007 *0186 
+VFDCHR_8   0008 *0187 
+VFDCHR_9   0009 *0188 
+VFDCHR_A   000a *0189 0986 1185 1218 
+VFDCHR_E   000e *0193 1183 1257 
+VFDCHR_F   000f *0194 
+VFDCHR_G   0010 *0195 
+VFDCHR_H   0011 *0196 1229 
+VFDCHR_J   0013 *0198 
+VFDCHR_L   0015 *0200 
+VFDCHR_MI  001e *0210 
+VFDCHR_P   0018 *0203 0974 
+VFDCHR_SPACE 001f *0211 0607 0936 1005 1054 1097 1189 1222 1224 1237 
+                      1250 1261 1263 1285 1287 
+VFDCHR_b   000b *0190 
+VFDCHR_c   000c *0191 1259 
+VFDCHR_d   000d *0192 1216 
+VFDCHR_i   0012 *0197 1246 1272 1276 
+VFDCHR_k   0014 *0199 
+VFDCHR_n   0016 *0201 1205 1209 1244 1248 1270 
+VFDCHR_o   0017 *0202 1207 1231 
+VFDCHR_q   0019 *0204 
+VFDCHR_r   001a *0205 1187 1203 1235 1242 1268 
+VFDCHR_t   001b *0206 1211 
+VFDCHR_u   001c *0207 1233 
+VFDCHR_y   001d *0208 1181 1220 
+VFDDigitScan 0032 *0063 0521 0598 0610 0613 0622 
+VFDDigitValue 0034 *0065 0303 0304 0522 0523 0524 0525 0526 0527 0528 
+                      0529 0530 0603 0937 0941 0944 0949 0952 0957 0960 0964 
+                      0966 0975 0981 0984 0987 0998 1000 1002 1004 1006 1010 
+                      1012 1016 1018 1051 1053 1055 1062 1065 1070 1073 1078 
+                      1080 1088 1090 1094 1096 1098 1102 1105 1110 1112 1182 
+                      1184 1186 1188 1190 1194 1196 1198 1200 1204 1206 1208 
+                      1210 1212 1217 1219 1221 1223 1225 1230 1232 1234 1236 
+                      1238 1243 1245 1247 1249 1251 1256 1258 1260 1262 1264 
+                      1269 1271 1273 1275 1277 1286 1288 1290 1292 
+VFDMsk0Dush 0040 *0169 0276 
+VFDMsk1Com 0010 *0170 0271 
+VFDMsk1Dp  0004 *0171 0281 
+VFDScanBitTbl 0080 *0123 0228 
+VFDScanStartPos 0033 *0064 0531 0599 0633 0636 0638 0781 0792 0815 
+VFDScnMsk0 0089 *0163 0250 
+VFDScnMsk1 00e9 *0164 0252 
+VFDScnMsk2 0001 *0165 0254 
+VFDSegCom  0020 *0172 1172 
+VFDSegDp   0080 *0174 1172 1176 
+VFDSegDush 0040 *0173 1174 
+VFDSegMsk0 0036 *0166 0262 
+VFDSegMsk1 0002 *0167 0264 
+VFDSegMsk2 000e *0168 0266 
+Work0      003d *0067 0225 0227 0269 0274 0279 0283 0285 0352 0361 
+                      0363 0365 0367 0608 0611 0697 0700 0747 0749 0751 0752 
+                      0753 0754 0755 0756 0757 0824 0826 0831 0835 0851 0942 
+                      0950 0958 0965 0982 1003 1011 1017 1034 1038 1052 1063 
+                      1071 1079 1089 1095 1103 1111 1124 1142 1153 1158 1163 
+                      1199 1291 1585 1599 1690 1700 
+Work1      003e *0068 0231 0251 0263 0275 0277 0353 0360 0362 0364 
+                      0366 0372 0373 0829 0843 0849 0856 0866 0940 0947 0955 
+                      0963 0980 1001 1009 1015 1050 1061 1068 1076 1087 1093 
+                      1101 1108 1118 1122 1140 1151 1156 1197 1289 1692 1702 
+                      1779 1783 
+Work2      003f *0069 0236 0253 0265 0270 0272 0280 0282 0329 0334 
+                      0339 0348 0355 0375 0999 1130 1161 1195 
+Work3      0040 *0070 0241 0255 0267 0337 0351 0819 0853 0872 0997 
+                      1129 1145 1193 
+Work4      0041 *0071 0383 0834 0860 0864 0943 0951 0983 1064 1072 
+                      1104 1138 1150 1168 1173 
+Work5      0042 *0072 0386 0948 0956 1069 1077 1109 1136 1148 1169 
+                      1175 1958 1964 
+Work6      0043 *0073 0382 0384 0959 1132 1141 1154 1157 1170 1177 
+                      1960 
+Work7      0044 *0074 0308 0315 0385 0387 1134 1139 1152 1155 1455 
+                      1461 1498 1504 1780 1782 1962 
+notTHBitThNum 00fc *0057 
